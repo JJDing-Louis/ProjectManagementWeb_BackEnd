@@ -1,0 +1,16 @@
+bin/
+obj/
+.vs/
+.vscode/
+.idea/
+TestResults/
+coverage/
+.env
+appsettings.Local.json
+secrets/
+*.user
+*.suo
+*.pfx
+*.pem
+*.key
+.DS_Store

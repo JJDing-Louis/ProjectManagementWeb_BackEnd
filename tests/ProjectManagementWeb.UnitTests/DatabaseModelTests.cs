@@ -1,0 +1,39 @@
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
+using ProjectManagementWeb.Domain.Entities;
+using ProjectManagementWeb.Infrastructure.Identity;
+using ProjectManagementWeb.Infrastructure.Persistence;
+
+namespace ProjectManagementWeb.UnitTests;
+
+public sealed class DatabaseModelTests
+{
+    private static ApplicationDbContext CreateContext()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=localhost;Database=ModelOnly;Integrated Security=True;TrustServerCertificate=True")
+            .Options;
+        return new ApplicationDbContext(options);
+    }
+
+    [Test]
+    public void AccountRole應由資料庫唯一索引限制每個帳號只有一個系統角色()
+    {
+        using ApplicationDbContext context = CreateContext();
+        IEntityType entity = context.Model.FindEntityType(typeof(ApplicationUserRole))!;
+
+        entity.GetIndexes().Should().Contain(index => index.IsUnique &&
+            index.Properties.Select(property => property.Name).SequenceEqual(new[] { nameof(ApplicationUserRole.UserId) }));
+    }
+
+    [Test]
+    public void ProjectMemberRole應使用三欄複合主鍵以支援一位成員多個專案角色()
+    {
+        using ApplicationDbContext context = CreateContext();
+        IKey primaryKey = context.Model.FindEntityType(typeof(ProjectMemberRole))!.FindPrimaryKey()!;
+
+        primaryKey.Properties.Select(property => property.Name).Should().Equal(
+            nameof(ProjectMemberRole.ProjectId), nameof(ProjectMemberRole.AccountId), nameof(ProjectMemberRole.ProjectRoleId));
+    }
+}

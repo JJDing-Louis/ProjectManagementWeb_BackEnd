@@ -1,0 +1,81 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?請設定 MSSQL_SA_PASSWORD}
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  database-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?請設定 MSSQL_SA_PASSWORD}
+      MSSQL_MIGRATOR_PASSWORD: ${MSSQL_MIGRATOR_PASSWORD:?請設定 MSSQL_MIGRATOR_PASSWORD}
+      MSSQL_APP_PASSWORD: ${MSSQL_APP_PASSWORD:?請設定 MSSQL_APP_PASSWORD}
+    volumes:
+      - ./docker/sql/init.sql:/scripts/init.sql:ro
+    entrypoint:
+      - /bin/bash
+      - -c
+      - >-
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -C
+        -v MigratorPassword="$$MSSQL_MIGRATOR_PASSWORD" AppPassword="$$MSSQL_APP_PASSWORD"
+        -i /scripts/init.sql -b
+    restart: "no"
+
+  migration:
+    build:
+      context: .
+      target: migrator
+    depends_on:
+      database-init:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: Server=sqlserver,1433;Database=ProjectManagementWeb;User Id=pmw_migrator;Password=${MSSQL_MIGRATOR_PASSWORD:?請設定 MSSQL_MIGRATOR_PASSWORD};Encrypt=True;TrustServerCertificate=True
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: final
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Server=sqlserver,1433;Database=ProjectManagementWeb;User Id=pmw_app;Password=${MSSQL_APP_PASSWORD:?請設定 MSSQL_APP_PASSWORD};Encrypt=True;TrustServerCertificate=True
+      Jwt__PrivateKeyPem: ${JWT_PRIVATE_KEY_PEM:-}
+      Smtp__UserName: ${SMTP_USERNAME:-}
+      Smtp__Password: ${SMTP_PASSWORD:-}
+      Smtp__FromAddress: ${SMTP_FROM_ADDRESS:-}
+      Cors__AllowedOrigins__0: ${VUE_ORIGIN:-http://localhost:5173}
+      DataProtection__ApplicationName: ProjectManagementWeb
+      DataProtection__KeysPath: /app/keys
+      BootstrapAdmin__Account: ${BOOTSTRAP_ADMIN_ACCOUNT:-}
+      BootstrapAdmin__Email: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - data-protection-keys:/app/keys
+
+volumes:
+  sqlserver-data:
+  data-protection-keys:

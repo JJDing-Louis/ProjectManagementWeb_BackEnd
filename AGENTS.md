@@ -4,7 +4,7 @@
 
 本文件適用於 `ProjectManagementWeb_BackEnd` 目錄及其所有子目錄。
 
-本目錄目前尚未初始化後端專案。後續初始化、開發、程式碼審查與測試皆以 **ASP.NET Core Web API** 為技術方向。除非需求另有明確決策，不得改用其他 Web framework，也不得把範例程式、空白 scaffold、尚未建置的程式碼視為完成實作。
+本目錄為已初始化的 **ASP.NET Core Web API** 後端專案。後續開發、程式碼審查與測試必須延續既有分層與技術選型。不得把範例程式、空白 scaffold、尚未建置或未驗證的程式碼視為完成實作。
 
 ## 2. 需求與文件優先順序
 
@@ -20,19 +20,20 @@
 
 文件互相衝突、驗收條件不足或 API 契約未定義時，不得自行發明業務規則。應先列出衝突、合理假設、可行方案與影響範圍，取得確認後才實作。
 
-目前已知 `UserStory.md` 與 `Flowchart/註冊、Email 驗證與登入.md` 對 Email 驗證後的角色有不同描述。此規則在確認前不得寫死於註冊、驗證或授權流程。
+角色規則已確認：一個帳號只能有一個系統角色；註冊後固定為 `Viewer`，Email 未驗證仍可登入但只能取得 `Viewer` 權限，驗證後也不自動提升。系統角色異動由 Admin 以取代方式執行；未驗證帳號不得提升為非 `Viewer`。
 
-`Schema.md` 是設計草稿，不是已核准的實體資料庫契約。建立 migration 或資料表前，必須先依本文件的資料庫規範完成審查並取得確認。
+`Schema.md` 是需求來源；正式 Schema 版本來源是 Infrastructure 專案中的 EF Core migrations、designer 與 model snapshot。Schema 變更必須同步產生 migration 並提交版本控制。
 
 ## 3. 技術基線
 
-- ASP.NET Core Web API，採用 C#。
+- .NET 10 LTS、ASP.NET Core Controller-based Web API，採用 C#。
 - API presentation 預設採 Controller，不將 Minimal API 與 Controller 混用。
 - 使用 SDK-style project，啟用 nullable reference types 與 implicit usings。
-- `.csproj` 必須明確指定 `TargetFramework`。初始化時應選擇仍受官方支援的 .NET 版本並記錄決策；不得在未確認相容性、套件與部署環境前自行升級 major version。
-- API 文件使用 ASP.NET Core OpenAPI 能力；若需加入額外套件，先說明必要性與維護風險。
-- 資料庫方向依 C4 規格為 SQL Server；ORM、micro-ORM 或原生 ADO.NET 尚未確認，不得先假定使用 Entity Framework Core、Dapper 或其他資料存取方案。
-- 測試以 xUnit 為預設方向；mock、assertion、container 等額外套件需依實際測試需求選用。
+- `.csproj` 明確指定 `net10.0`，並由 `global.json` 固定 SDK feature band；升級 major version 前必須確認套件與部署環境相容性。
+- API 文件使用 `Microsoft.AspNetCore.OpenApi` 產生 OpenAPI 3 文件，並使用 Swashbuckle 提供 Swagger UI 與 JWT Bearer 測試介面。
+- 資料庫使用 SQL Server 2022 與 Entity Framework Core 10；禁止使用 `EnsureCreated`，所有 Schema 異動以 migration 版本控制。
+- 身分使用 ASP.NET Core Identity（Guid 主鍵），Access Token 使用 RSA JWT Bearer，Refresh Token 使用 HttpOnly Cookie、SHA-256 hash、rotation 與 family reuse detection。
+- 測試使用 NUnit 4、Moq、Bogus 與 FluentAssertions 7.2.2；整合測試使用 `WebApplicationFactory` 與實際 SQL Server，不以 EF InMemory 取代 relational behavior。
 
 新增 NuGet package 前，必須說明用途、維護狀態、安全性、授權、替代方案與對架構的影響。避免加入功能重疊的套件，也不得只為少量簡單邏輯引入大型 framework。
 
@@ -117,7 +118,9 @@ Controller 與 route 命名以業務資源為主，例如 Accounts、Users、Pro
 - 授權規則優先集中為 policy、authorization service 或 use-case guard，禁止在各 Controller 複製角色字串判斷。
 - `Viewer` 只能讀取有權限存取的資料，不得新增、修改、刪除、留言、切換 Task 狀態或調整角色。
 - 密碼只允許使用 ASP.NET Core Identity 或經審查的密碼雜湊機制保存，禁止明文、可逆加密或自行設計密碼雜湊演算法。
-- Token、cookie、session 與 refresh／revocation 策略尚未確認前，不得自行假定 JWT 或將長效憑證寫入不安全儲存位置。
+- Access Token 固定使用 15 分鐘 RSA JWT，包含唯一系統角色、Function 與 token-version claims；Refresh Token 為 7 天高熵 opaque token，原文只存 HttpOnly Cookie，資料庫只保存 SHA-256 hash，且每次使用必須輪替。
+- 停用帳號或異動系統角色時，必須遞增 token version 並撤銷全部 Refresh Token；舊 Refresh Token 被重用時撤銷整個 token family。
+- cookie-sensitive Auth API 必須驗證 `X-CSRF-TOKEN`；一般業務 API 只接受 Authorization Bearer，不以 Refresh Token Cookie 作為身分憑證。
 - Email 驗證 token 必須具備安全隨機性、用途限制、有效期限與重送／失效規則，不得在 log 中記錄 token 原文。
 - 若採 cookie authentication，必須評估 CSRF；若採 bearer token，必須評估 token 洩漏、過期、撤銷與 replay 風險。
 - 管理員異動角色、停用帳號及其他敏感操作必須留下可追溯稽核紀錄。

@@ -1,12 +1,33 @@
 using Bogus;
 using FluentAssertions;
+using ProjectManagementWeb.Application.Common;
 using ProjectManagementWeb.Domain.Entities;
+using ProjectManagementWeb.Domain.Enums;
 using TaskStatus = ProjectManagementWeb.Domain.Enums.TaskStatus;
 
 namespace ProjectManagementWeb.UnitTests;
 
 public sealed class DomainEntityTests
 {
+    [TestCase(BusinessCodeType.Project, "PRJ-20260823000001")]
+    [TestCase(BusinessCodeType.Task, "TASK-20260823000001")]
+    public void 業務編號應使用Utc日期與六位流水號(BusinessCodeType codeType, string expected)
+    {
+        string code = BusinessCodeFormatter.Format(codeType, new DateOnly(2026, 8, 23), 1);
+
+        code.Should().Be(expected);
+    }
+
+    [Test]
+    public void BusinessCodeCounter應從一開始並逐次遞增()
+    {
+        var counter = new BusinessCodeCounter(BusinessCodeType.Project, new DateOnly(2026, 8, 23));
+
+        counter.LastValue.Should().Be(1);
+        counter.TryIncrement().Should().BeTrue();
+        counter.LastValue.Should().Be(2);
+    }
+
     [Test]
     public void RefreshToken撤銷後不可再使用且保留替代Token識別碼()
     {

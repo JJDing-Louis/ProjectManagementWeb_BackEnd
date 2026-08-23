@@ -25,6 +25,7 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
     public DbSet<TaskItemHistory> TaskItemHistories => Set<TaskItemHistory>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<EmailMessage> EmailMessages => Set<EmailMessage>();
+    public DbSet<BusinessCodeCounter> BusinessCodeCounters => Set<BusinessCodeCounter>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -176,6 +177,17 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
 
     private static void ConfigureSystemTables(ModelBuilder builder)
     {
+        builder.Entity<BusinessCodeCounter>(entity =>
+        {
+            entity.ToTable("BusinessCodeCounters", table =>
+            {
+                table.HasCheckConstraint("CK_BusinessCodeCounters_CodeType", "[CodeType] IN ('Project', 'Task')");
+                table.HasCheckConstraint("CK_BusinessCodeCounters_LastValue", "[LastValue] BETWEEN 1 AND 999999");
+            });
+            entity.HasKey(x => new { x.CodeType, x.BusinessDate });
+            entity.Property(x => x.CodeType).HasConversion<string>().HasMaxLength(20);
+            entity.Property(x => x.BusinessDate).HasColumnType("date");
+        });
         builder.Entity<AuditLog>(entity =>
         {
             entity.ToTable("AuditLogs");

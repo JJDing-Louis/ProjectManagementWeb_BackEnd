@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using ProjectManagementWeb.Api;
@@ -59,5 +60,14 @@ public sealed class ApiSurfaceTests
         document.Should().Contain("Bearer");
         document.Should().Contain("/api/v1/auth/login");
         document.Should().Contain("/api/v1/projects/{projectId}/task-items");
+        document.Should().Contain("/api/v1/users/{id}/administration");
+        document.Should().Contain("/api/v1/projects/{id}/member-candidates");
+
+        using JsonDocument openApi = JsonDocument.Parse(document);
+        JsonElement schemas = openApi.RootElement.GetProperty("components").GetProperty("schemas");
+        schemas.GetProperty("CreateProjectRequest").GetProperty("properties").TryGetProperty("code", out _)
+            .Should().BeFalse();
+        schemas.GetProperty("CreateTaskRequest").GetProperty("properties").TryGetProperty("code", out _)
+            .Should().BeFalse();
     }
 }

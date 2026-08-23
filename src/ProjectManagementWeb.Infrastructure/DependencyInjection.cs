@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using ProjectManagementWeb.Application.Auth;
 using ProjectManagementWeb.Application.Comments;
+using ProjectManagementWeb.Application.Common;
 using ProjectManagementWeb.Application.Preferences;
 using ProjectManagementWeb.Application.Projects;
 using ProjectManagementWeb.Application.Tasks;
@@ -53,6 +54,7 @@ public static class DependencyInjection
 
         services.AddScoped<IEmailGateway, SmtpEmailGateway>();
         services.AddScoped<ServiceSupport>();
+        services.AddScoped<IBusinessCodeGenerator, BusinessCodeGenerator>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IPreferenceService, PreferenceService>();

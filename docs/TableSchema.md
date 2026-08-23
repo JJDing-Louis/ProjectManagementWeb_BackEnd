@@ -203,6 +203,18 @@ ASP.NET Core Identity 帳號資料。
 
 ## 系統紀錄
 
+### BusinessCodeCounters
+
+Project 與 Task 的 UTC 每日業務編號計數器。產生編號與建立實體使用同一個 Serializable transaction，並以 SQL Server `UPDLOCK`、`HOLDLOCK` 保護同日計數器。
+
+| 欄位 | 型別 | Null | Key／Constraint | 說明 |
+|---|---|---:|---|---|
+| `CodeType` | `nvarchar(20)` | 否 | PK、CHECK | 僅允許 `Project`、`Task` |
+| `BusinessDate` | `date` | 否 | PK | `TimeProvider.GetUtcNow()` 對應的 UTC 日期 |
+| `LastValue` | `int` | 否 | CHECK 1–999999 | 當日最後已使用流水號 |
+
+格式為 `PRJ-YYYYMMDD######` 與 `TASK-YYYYMMDD######`。兩類型每日各自從 `000001` 起算；超過 `999999` 時 API 回傳 `daily_code_limit_exceeded`，交易失敗時計數器與實體一併 rollback。
+
 ### AuditLogs
 
 | 欄位 | 型別 | Null | Key／Constraint | 說明 |
@@ -237,7 +249,7 @@ ASP.NET Core Identity 帳號資料。
 - `AccountRoles.UserId` UNIQUE：資料庫層保證每帳號最多一個系統角色。
 - `ProjectMembers(ProjectId, AccountId)` PK：每帳號在同一專案只有一筆 membership。
 - `ProjectMemberRoles(ProjectId, AccountId, ProjectRoleId)` PK：同一 membership 可有多個專案角色。
-- Project／Task Code 的唯一性只套用未軟刪除資料；軟刪除後可以重用 Code。
+- Project／Task Code 由 `BusinessCodeCounters` 產生；既有 filtered unique index 仍只套用未軟刪除資料。產生器不會主動重用軟刪除 Code。
 - Task Code 現行唯一索引不包含 `ProjectId`，因此 Code 是全系統唯一，而非專案內唯一。
 - `RefreshTokens.ReplacedByTokenId` 沒有 FK；完整性由應用服務維護。
 - `Accounts.NormalizedEmail` 只有一般 index；runtime unique Email 與 DB constraint 尚未完全對齊。

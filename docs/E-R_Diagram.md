@@ -1,6 +1,6 @@
 # E-R Diagram
 
-本文件依目前 EF Core model 與 `InitialCreate` migration 繪製。為維持可讀性，將 20 張資料表拆成 Identity／RBAC、專案／Task、系統紀錄三張圖。完整欄位定義請參閱 [TableSchema.md](TableSchema.md)。
+本文件依目前 EF Core model 與 migrations 繪製。為維持可讀性，將 21 張資料表拆成 Identity／RBAC、專案／Task、系統紀錄三張圖。完整欄位定義請參閱 [TableSchema.md](TableSchema.md)。
 
 ## Identity 與 RBAC
 
@@ -175,12 +175,18 @@ erDiagram
         datetimeoffset CreatedAt
         datetimeoffset SentAt
     }
+    BUSINESS_CODE_COUNTERS {
+        nvarchar CodeType PK
+        date BusinessDate PK
+        int LastValue
+    }
 
     ACCOUNTS o|--o{ AUDIT_LOGS : performs
 ```
 
 - `AuditLogs.ActorAccountId` 可為 null，以支援系統操作；FK 採 `NoAction`，避免刪除帳號時破壞稽核資料。
 - `EmailMessages` 目前是獨立寄送紀錄，只保存 Recipient，沒有對 `Accounts` 建立 FK。
+- `BusinessCodeCounters` 是無外鍵的 Project／Task UTC 每日計數器，複合主鍵為 `(CodeType, BusinessDate)`。
 - `RefreshTokens.ReplacedByTokenId` 是應用層維護的輪替指標，目前不是資料庫 FK，因此未畫成實體關聯。
 
 ## 刪除與生命週期

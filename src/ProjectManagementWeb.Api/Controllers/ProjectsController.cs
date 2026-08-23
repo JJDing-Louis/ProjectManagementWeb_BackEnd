@@ -42,6 +42,11 @@ public sealed class ProjectsController : ApiControllerBase
     public async Task<ActionResult<IReadOnlyCollection<ProjectMemberResponse>>> GetMembers(Guid id, CancellationToken cancellationToken) =>
         FromResult(await _projects.GetMembersAsync(id, cancellationToken));
 
+    [HttpGet("{id:guid}/member-candidates")]
+    public async Task<ActionResult<PagedResult<MemberCandidateResponse>>> GetMemberCandidates(Guid id,
+        [FromQuery] MemberCandidateQuery query, CancellationToken cancellationToken) =>
+        FromResult(await _projects.GetMemberCandidatesAsync(id, query, cancellationToken));
+
     [HttpPost("{id:guid}/members")]
     public async Task<ActionResult<ProjectMemberResponse>> AddMember(Guid id, SaveProjectMemberRequest request, CancellationToken cancellationToken) =>
         FromResult(await _projects.AddMemberAsync(id, request, cancellationToken));

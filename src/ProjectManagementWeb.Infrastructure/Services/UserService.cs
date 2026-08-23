@@ -150,6 +150,70 @@ internal sealed class UserService : IUserService
         return ServiceResult<UserResponse>.Success(await MapAsync(user));
     }
 
+    public async Task<ServiceResult<UserResponse>> UpdateAdministrationAsync(Guid id,
+        UpdateAdministrationRequest request, CancellationToken cancellationToken)
+    {
+        if (!_currentUser.HasFunction(SystemFunctions.AccountsManageRole) ||
+            !_currentUser.HasFunction(SystemFunctions.AccountsManageStatus))
+        {
+            return ServiceResult<UserResponse>.Failure("forbidden", "只有 Admin 可以管理帳號。", 403);
+        }
+
+        ApplicationUser? user = await _userManager.FindByIdAsync(id.ToString());
+        ApplicationRole? role = await _roleManager.FindByIdAsync(request.RoleId.ToString());
+        if (user is null || role?.Name is null)
+        {
+            return ServiceResult<UserResponse>.Failure("not_found", "找不到帳號或角色。", 404);
+        }
+        if (!user.EmailConfirmed && role.Name != SystemRoles.Viewer)
+        {
+            return ServiceResult<UserResponse>.Failure("email_not_confirmed", "Email 尚未驗證，只能使用 Viewer。", 422);
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        IList<string> currentRoles = await _userManager.GetRolesAsync(user);
+        string currentRole = currentRoles.SingleOrDefault() ?? SystemRoles.Viewer;
+        bool removesEnabledAdmin = currentRole == SystemRoles.Admin && user.IsEnabled &&
+                                   (role.Name != SystemRoles.Admin || !request.IsEnabled);
+        if (removesEnabledAdmin && await CountAdminsAsync(cancellationToken) <= 1)
+        {
+            return ServiceResult<UserResponse>.Failure("last_admin", "不可停用或移除最後一位 Admin。", 409);
+        }
+
+        if (!string.Equals(currentRole, role.Name, StringComparison.Ordinal))
+        {
+            if (currentRoles.Count > 0)
+            {
+                IdentityResult removed = await _userManager.RemoveFromRolesAsync(user, currentRoles);
+                if (!removed.Succeeded)
+                {
+                    return ServiceResult<UserResponse>.Failure("role_update_failed", "無法移除原角色。", 500);
+                }
+            }
+            IdentityResult added = await _userManager.AddToRoleAsync(user, role.Name);
+            if (!added.Succeeded)
+            {
+                return ServiceResult<UserResponse>.Failure("role_update_failed", "無法設定角色。", 500);
+            }
+        }
+
+        bool wasEnabled = user.IsEnabled;
+        user.IsEnabled = request.IsEnabled;
+        user.TokenVersion++;
+        IdentityResult updated = await _userManager.UpdateAsync(user);
+        if (!updated.Succeeded)
+        {
+            return ServiceResult<UserResponse>.Failure("account_update_failed", "無法更新帳號。", 500);
+        }
+        await RevokeTokensAsync(user.Id, cancellationToken);
+        _support.AddAudit("UpdateAdministration", "Account", user.Id.ToString(),
+            new { Role = currentRole, IsEnabled = wasEnabled },
+            new { Role = role.Name, request.IsEnabled }, _timeProvider.GetUtcNow());
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return ServiceResult<UserResponse>.Success(await MapAsync(user));
+    }
+
     public async Task<IReadOnlyCollection<RoleResponse>> GetRolesAsync(CancellationToken cancellationToken)
     {
         List<ApplicationRole> roles = await _db.Roles.AsNoTracking().OrderBy(x => x.Name).ToListAsync(cancellationToken);

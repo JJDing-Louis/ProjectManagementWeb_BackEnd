@@ -5,7 +5,7 @@ namespace ProjectManagementWeb.Application.Tasks;
 
 public sealed record TaskQuery(string? Search, TaskStatus? Status, Guid? AssignedAccountId, bool OnlyMine,
     string SortBy = "createdAt", string SortDirection = "desc", int Page = 1, int PageSize = 20);
-public sealed record CreateTaskRequest(string Code, string Title, string? Description, Guid AssignedAccountId,
+public sealed record CreateTaskRequest(string Title, string? Description, Guid AssignedAccountId,
     DateTimeOffset StartAt, DateTimeOffset Deadline);
 public sealed record UpdateTaskRequest(string Title, string? Description, Guid AssignedAccountId, DateTimeOffset StartAt,
     DateTimeOffset Deadline, TaskStatus Status, string RowVersion);

@@ -6,9 +6,9 @@ ProjectManagementWeb 的 ASP.NET Core Web API 後端 MVP。採前後端分離、
 
 | 文件 | 內容 |
 |---|---|
-| [API 清單](docs/ApiList.md) | 35 個 `/api/v1` endpoint、授權範圍、request 與 status code |
+| [API 清單](docs/ApiList.md) | 37 個 `/api/v1` endpoint、授權範圍、request 與 status code |
 | [系統架構](docs/Architecture.md) | C4 Level 3 Component Diagram、主要請求流程與 Compose 部署關係 |
-| [資料表 Schema](docs/TableSchema.md) | 20 張資料表的欄位、PK、FK、index、刪除行為與現行風險 |
+| [資料表 Schema](docs/TableSchema.md) | 21 張資料表的欄位、PK、FK、index、刪除行為與現行風險 |
 | [E-R Diagram](docs/E-R_Diagram.md) | Identity／RBAC、專案／Task 與系統紀錄關聯圖 |
 | [前端／API 契約](docs/FrontendContract.md) | Vue／TypeScript 型別、JWT、CSRF、refresh、rowversion 與錯誤處理 |
 
@@ -110,7 +110,7 @@ dotnet ef migrations add MigrationName --project src/ProjectManagementWeb.Infras
 
 禁止使用 `EnsureCreated`。Project、Task、可修改留言使用 SQL Server `rowversion`，API 以 Base64 傳遞；版本衝突回傳 HTTP 409。
 
-目前 migration 共有 20 張資料表。值得注意的是，Identity 執行期要求 Email 唯一，但現行 migration 尚未對 `Accounts.NormalizedEmail` 建立 UNIQUE constraint；若要從資料庫層完整保證，需另建 migration。詳細限制請參閱 [TableSchema.md](docs/TableSchema.md)。
+目前 migration 共有 21 張資料表。Project／Task 業務編號由後端依 UTC 日期自動產生，格式分別為 `PRJ-YYYYMMDD######` 與 `TASK-YYYYMMDD######`，兩類型每日各自從 `000001` 起算。值得注意的是，Identity 執行期要求 Email 唯一，但現行 migration 尚未對 `Accounts.NormalizedEmail` 建立 UNIQUE constraint；若要從資料庫層完整保證，需另建 migration。詳細限制請參閱 [TableSchema.md](docs/TableSchema.md)。
 
 ## 驗證
 
@@ -126,4 +126,4 @@ IntegrationTests 的輕量 API surface 測試使用 `WebApplicationFactory`。�
 
 ## 本階段不包含
 
-Vue 前端、Hangfire 到期提醒、RoleFunction 動態管理、雲端部署與密碼重設不在本 MVP 範圍。
+Hangfire 到期提醒、RoleFunction 動態管理、雲端部署與密碼重設不在本 MVP 範圍。Vue 3 前端已透過 `/api/v1` 正式串接本 API。

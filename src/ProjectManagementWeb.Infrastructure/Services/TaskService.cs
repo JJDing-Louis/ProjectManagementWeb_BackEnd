@@ -1,9 +1,11 @@
+using System.Data;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using ProjectManagementWeb.Application.Common;
 using ProjectManagementWeb.Application.Tasks;
 using ProjectManagementWeb.Domain.Constants;
 using ProjectManagementWeb.Domain.Entities;
+using ProjectManagementWeb.Domain.Enums;
 using ProjectManagementWeb.Infrastructure.Persistence;
 using TaskStatus = ProjectManagementWeb.Domain.Enums.TaskStatus;
 
@@ -15,13 +17,16 @@ internal sealed class TaskService : ITaskService
     private readonly ICurrentUser _currentUser;
     private readonly ServiceSupport _support;
     private readonly TimeProvider _timeProvider;
+    private readonly IBusinessCodeGenerator _codeGenerator;
 
-    public TaskService(ApplicationDbContext db, ICurrentUser currentUser, ServiceSupport support, TimeProvider timeProvider)
+    public TaskService(ApplicationDbContext db, ICurrentUser currentUser, ServiceSupport support,
+        TimeProvider timeProvider, IBusinessCodeGenerator codeGenerator)
     {
         _db = db;
         _currentUser = currentUser;
         _support = support;
         _timeProvider = timeProvider;
+        _codeGenerator = codeGenerator;
     }
 
     public async Task<ServiceResult<PagedResult<TaskResponse>>> GetTasksAsync(Guid projectId, TaskQuery query, CancellationToken cancellationToken)
@@ -77,17 +82,19 @@ internal sealed class TaskService : ITaskService
         {
             return ServiceResult<TaskResponse>.Failure("forbidden", "沒有建立 Task 的權限。", 403);
         }
-        if (string.IsNullOrWhiteSpace(request.Code) || request.Code.Trim().Length > 50)
-        {
-            return ServiceResult<TaskResponse>.Failure("validation_error", "Task 編號為必填且不得超過 50 字。", 400);
-        }
         ServiceError? validation = await ValidateTaskAsync(projectId, request.Title, request.AssignedAccountId, request.StartAt, request.Deadline, cancellationToken);
         if (validation is not null)
         {
             return ServiceResult<TaskResponse>.Failure(validation.Code, validation.Message, validation.StatusCode);
         }
         DateTimeOffset now = _timeProvider.GetUtcNow();
-        var task = new TaskItem(Guid.NewGuid(), request.Code.Trim(), projectId, actorId, request.AssignedAccountId,
+        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        string? code = await _codeGenerator.GenerateAsync(BusinessCodeType.Task, now, cancellationToken);
+        if (code is null)
+        {
+            return ServiceResult<TaskResponse>.Failure("daily_code_limit_exceeded", "今日 Task 編號已達上限。", 409);
+        }
+        var task = new TaskItem(Guid.NewGuid(), code, projectId, actorId, request.AssignedAccountId,
             request.Title.Trim(), request.Description?.Trim(), request.StartAt, request.Deadline, now);
         _db.TaskItems.Add(task);
         AddHistory(task, actorId, "Create", now);
@@ -95,6 +102,7 @@ internal sealed class TaskService : ITaskService
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException)
         {

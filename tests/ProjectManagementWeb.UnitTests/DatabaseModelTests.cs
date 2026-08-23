@@ -36,4 +36,14 @@ public sealed class DatabaseModelTests
         primaryKey.Properties.Select(property => property.Name).Should().Equal(
             nameof(ProjectMemberRole.ProjectId), nameof(ProjectMemberRole.AccountId), nameof(ProjectMemberRole.ProjectRoleId));
     }
+
+    [Test]
+    public void BusinessCodeCounter應以類型與Utc日期組成複合主鍵()
+    {
+        using ApplicationDbContext context = CreateContext();
+        IKey primaryKey = context.Model.FindEntityType(typeof(BusinessCodeCounter))!.FindPrimaryKey()!;
+
+        primaryKey.Properties.Select(property => property.Name).Should().Equal(
+            nameof(BusinessCodeCounter.CodeType), nameof(BusinessCodeCounter.BusinessDate));
+    }
 }

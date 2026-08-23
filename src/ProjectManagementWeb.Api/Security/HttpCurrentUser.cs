@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using ProjectManagementWeb.Application.Common;
+using ProjectManagementWeb.Infrastructure.Security;
 
 namespace ProjectManagementWeb.Api.Security;
 
@@ -14,5 +15,6 @@ internal sealed class HttpCurrentUser : ICurrentUser
     public Guid? AccountId => Guid.TryParse(Principal?.FindFirstValue(JwtRegisteredClaimNames.Sub), out Guid id) ? id : null;
     public string? Role => Principal?.FindFirstValue("role");
     public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated == true;
-    public bool HasFunction(string functionCode) => Principal?.FindAll("function").Any(x => x.Value == functionCode) == true;
+    public bool HasFunction(string functionCode) =>
+        Principal?.FindAll(TokenClaims.Permission).Any(x => x.Value == functionCode) == true;
 }

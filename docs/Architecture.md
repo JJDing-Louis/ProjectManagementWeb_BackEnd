@@ -19,7 +19,7 @@ flowchart LR
 
     subgraph application[ProjectManagementWeb.Application]
         contracts[Contracts 與 DTOs<br/>Request、Response、PagedResult]
-        ports[Application Interfaces<br/>IAuthService、IUserService、IProjectService<br/>ITaskService、ICommentService、IPreferenceService]
+        ports[Application Interfaces<br/>Auth、User、Project、Task、Comment、Preference<br/>IBusinessCodeGenerator]
         results[ServiceResult<br/>ServiceError]
     end
 
@@ -32,6 +32,7 @@ flowchart LR
         dbContext[ApplicationDbContext<br/>EF Core Mapping、Query Filters]
         migrations[EF Core Migrations<br/>Schema 版本來源]
         bootstrap[DatabaseBootstrapper<br/>初始 Admin]
+        codeGenerator[BusinessCodeGenerator<br/>UTC 每日流水號與交易鎖]
     end
 
     subgraph domain[ProjectManagementWeb.Domain]
@@ -53,6 +54,8 @@ flowchart LR
     services --> token
     services --> email
     services --> dbContext
+    services --> codeGenerator
+    codeGenerator --> dbContext
     support --> currentUser
     support --> dbContext
     identity --> dbContext
@@ -77,6 +80,7 @@ flowchart LR
 | `ServiceSupport` | 計算全域 Function 與專案成員／ProjectManager 的資源權限 | 驗證密碼與簽發 token |
 | Identity／Token | 帳號驗證、唯一系統角色、JWT 簽發與 token-version、Refresh Token rotation | 專案角色授權 |
 | `ApplicationDbContext` | EF Core mapping、關聯、索引、query filter 與 seed data | 執行 HTTP 層驗證 |
+| `BusinessCodeGenerator` | 使用 UTC 日期與 SQL Server transaction lock 產生 Project／Task 每日獨立業務編號 | 在建立交易之外保存或預留編號 |
 | Domain | 業務實體、固定角色／Function 與狀態列舉 | 基礎設施連線與框架組態 |
 | `SmtpEmailGateway` | 經 SMTP 寄送 Email 驗證信 | 決定註冊 transaction 是否成功 |
 

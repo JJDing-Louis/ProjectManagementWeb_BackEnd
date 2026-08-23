@@ -1,8 +1,10 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using ProjectManagementWeb.Application.Common;
 using ProjectManagementWeb.Application.Projects;
 using ProjectManagementWeb.Domain.Constants;
 using ProjectManagementWeb.Domain.Entities;
+using ProjectManagementWeb.Domain.Enums;
 using ProjectManagementWeb.Infrastructure.Identity;
 using ProjectManagementWeb.Infrastructure.Persistence;
 
@@ -14,13 +16,16 @@ internal sealed class ProjectService : IProjectService
     private readonly ICurrentUser _currentUser;
     private readonly ServiceSupport _support;
     private readonly TimeProvider _timeProvider;
+    private readonly IBusinessCodeGenerator _codeGenerator;
 
-    public ProjectService(ApplicationDbContext db, ICurrentUser currentUser, ServiceSupport support, TimeProvider timeProvider)
+    public ProjectService(ApplicationDbContext db, ICurrentUser currentUser, ServiceSupport support,
+        TimeProvider timeProvider, IBusinessCodeGenerator codeGenerator)
     {
         _db = db;
         _currentUser = currentUser;
         _support = support;
         _timeProvider = timeProvider;
+        _codeGenerator = codeGenerator;
     }
 
     public async Task<ServiceResult<PagedResult<ProjectResponse>>> GetProjectsAsync(ProjectQuery query, CancellationToken cancellationToken)
@@ -74,9 +79,9 @@ internal sealed class ProjectService : IProjectService
         {
             return ServiceResult<ProjectResponse>.Failure("forbidden", "沒有建立專案的權限。", 403);
         }
-        if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name))
+        if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return ServiceResult<ProjectResponse>.Failure("validation_error", "專案編號與名稱為必填。", 400);
+            return ServiceResult<ProjectResponse>.Failure("validation_error", "專案名稱為必填。", 400);
         }
         ApplicationUser? owner = await _db.Users.SingleOrDefaultAsync(x => x.Id == request.OwnerAccountId && x.IsEnabled, cancellationToken);
         if (owner is null)
@@ -84,7 +89,13 @@ internal sealed class ProjectService : IProjectService
             return ServiceResult<ProjectResponse>.Failure("invalid_owner", "Owner 必須是有效帳號。", 422);
         }
         DateTimeOffset now = _timeProvider.GetUtcNow();
-        var project = new Project(Guid.NewGuid(), request.Code.Trim(), request.Name.Trim(), request.Description?.Trim(), request.OwnerAccountId, now);
+        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        string? code = await _codeGenerator.GenerateAsync(BusinessCodeType.Project, now, cancellationToken);
+        if (code is null)
+        {
+            return ServiceResult<ProjectResponse>.Failure("daily_code_limit_exceeded", "今日 Project 編號已達上限。", 409);
+        }
+        var project = new Project(Guid.NewGuid(), code, request.Name.Trim(), request.Description?.Trim(), request.OwnerAccountId, now);
         _db.Projects.Add(project);
         _db.ProjectMembers.Add(new ProjectMember(project.Id, request.OwnerAccountId, now));
         _db.ProjectMemberRoles.Add(new ProjectMemberRole(project.Id, request.OwnerAccountId,
@@ -93,6 +104,7 @@ internal sealed class ProjectService : IProjectService
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException)
         {
@@ -107,6 +119,7 @@ internal sealed class ProjectService : IProjectService
         {
             return ServiceResult<ProjectResponse>.Failure("forbidden", "沒有修改此專案的權限。", 403);
         }
+        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         Project? project = await _db.Projects.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (project is null)
         {
@@ -121,6 +134,13 @@ internal sealed class ProjectService : IProjectService
         {
             return ServiceResult<ProjectResponse>.Failure("invalid_owner", "Owner 必須是專案成員。", 422);
         }
+        Guid managerRoleId = SeedIds.Create($"project-role:{ProjectRoleCodes.ProjectManager}");
+        bool ownerIsManager = await _db.ProjectMemberRoles.AnyAsync(x => x.ProjectId == id &&
+            x.AccountId == request.OwnerAccountId && x.ProjectRoleId == managerRoleId, cancellationToken);
+        if (!ownerIsManager)
+        {
+            _db.ProjectMemberRoles.Add(new ProjectMemberRole(id, request.OwnerAccountId, managerRoleId));
+        }
         var before = new { project.Name, project.Description, project.OwnerAccountId, project.Status };
         project.Update(request.Name.Trim(), request.Description?.Trim(), request.OwnerAccountId, request.Status, _timeProvider.GetUtcNow());
         _support.AddAudit("Update", "Project", id.ToString(), before,
@@ -128,6 +148,7 @@ internal sealed class ProjectService : IProjectService
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -143,6 +164,34 @@ internal sealed class ProjectService : IProjectService
             return ServiceResult<IReadOnlyCollection<ProjectMemberResponse>>.Failure("forbidden", "沒有讀取成員的權限。", 403);
         }
         return ServiceResult<IReadOnlyCollection<ProjectMemberResponse>>.Success(await MapMembersAsync(projectId, null, cancellationToken));
+    }
+
+    public async Task<ServiceResult<PagedResult<MemberCandidateResponse>>> GetMemberCandidatesAsync(Guid projectId,
+        MemberCandidateQuery query, CancellationToken cancellationToken)
+    {
+        if (!await _support.CanManageProjectAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<PagedResult<MemberCandidateResponse>>.Failure("forbidden", "沒有管理成員的權限。", 403);
+        }
+
+        int page = Math.Max(query.Page, 1);
+        int pageSize = Math.Clamp(query.PageSize, 1, 100);
+        IQueryable<ApplicationUser> candidates = _db.Users.AsNoTracking().Where(user => user.IsEnabled &&
+            !_db.ProjectMembers.Any(member => member.ProjectId == projectId && member.AccountId == user.Id));
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            string search = query.Search.Trim();
+            candidates = candidates.Where(x => (x.UserName != null && x.UserName.Contains(search)) ||
+                                                 (x.Name != null && x.Name.Contains(search)));
+        }
+
+        int total = await candidates.CountAsync(cancellationToken);
+        MemberCandidateResponse[] items = await candidates.OrderBy(x => x.UserName)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new MemberCandidateResponse(x.Id, x.UserName ?? string.Empty, x.Name))
+            .ToArrayAsync(cancellationToken);
+        return ServiceResult<PagedResult<MemberCandidateResponse>>.Success(
+            new PagedResult<MemberCandidateResponse>(items, page, pageSize, total));
     }
 
     public async Task<ServiceResult<ProjectMemberResponse>> AddMemberAsync(Guid projectId, SaveProjectMemberRequest request, CancellationToken cancellationToken)

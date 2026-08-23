@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Moq;
 using ProjectManagementWeb.Api.Security;
+using ProjectManagementWeb.Infrastructure.Security;
 
 namespace ProjectManagementWeb.UnitTests;
 
@@ -20,7 +21,7 @@ public sealed class HttpCurrentUserTests
         [
             new Claim(JwtRegisteredClaimNames.Sub, accountId.ToString()),
             new Claim("role", "User"),
-            new Claim("function", function)
+            new Claim(TokenClaims.Permission, function)
         ], "Test");
         var context = new DefaultHttpContext { User = new ClaimsPrincipal(identity) };
         var accessor = new Mock<IHttpContextAccessor>();

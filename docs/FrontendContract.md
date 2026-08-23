@@ -158,6 +158,11 @@ export interface UpdateUserStatusRequest {
   isEnabled: boolean
 }
 
+export interface UpdateAdministrationRequest {
+  roleId: Guid
+  isEnabled: boolean
+}
+
 export interface PreferenceResponse {
   skipBatchConfirmation: boolean
 }
@@ -182,7 +187,6 @@ export interface ProjectQuery {
 }
 
 export interface CreateProjectRequest {
-  code: string
   name: string
   description: string | null
   ownerAccountId: Guid
@@ -221,6 +225,12 @@ export interface ProjectMemberResponse {
   roles: ProjectRoleResponse[]
 }
 
+export interface MemberCandidateResponse {
+  id: Guid
+  account: string
+  name: string | null
+}
+
 export interface SaveProjectMemberRequest {
   accountId: Guid
   projectRoleIds: Guid[]
@@ -231,7 +241,9 @@ export interface UpdateProjectMemberRequest {
 }
 ```
 
-- 建立專案後，Owner 會自動成為 member 並取得 `ProjectManager`。
+- 建立專案時不傳 `code`；後端依 UTC 日期產生 `PRJ-YYYYMMDD######`，Project 每日獨立從 `000001` 起算。
+- 建立專案後，Owner 會自動成為 member 並取得 `ProjectManager`；移交 Owner 時亦會在同一交易補上新 Owner 的 `ProjectManager`。
+- 成員候選人使用 `GET /projects/{id}/member-candidates`，分頁結果只揭露 `accountId`、`account`、`name`。
 - 成員角色 UI 必須使用複選；`projectRoleIds` 至少一筆。PUT 是完整取代角色集合，不是增量 patch。
 - Owner 必須維持專案成員身分；移除 Owner 前要先透過 Project PUT 移交。
 - Viewer 即使資料中具有 ProjectManager 角色，仍不能顯示或執行寫入操作。
@@ -251,7 +263,6 @@ export interface TaskQuery {
 }
 
 export interface CreateTaskRequest {
-  code: string
   title: string
   description: string | null
   assignedAccountId: Guid
@@ -306,6 +317,7 @@ export interface BatchUpdateResponse {
 }
 ```
 
+- 建立 Task 時不傳 `code`；後端依 UTC 日期產生 `TASK-YYYYMMDD######`，Task 每日獨立從 `000001` 起算。
 - 指派者必須是該專案成員，且 `deadline` 不可早於 `startAt`。
 - 一般 User 透過 `status-and-deadline` 只修改指派給自己的 Task；管理者的完整修改使用 PUT。
 - Batch request 必須帶每筆目前的 `rowVersion`。後端先驗證全部資料，再以單一 transaction 寫入；任一筆失敗時整批不更新。

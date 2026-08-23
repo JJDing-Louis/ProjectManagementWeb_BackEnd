@@ -35,6 +35,11 @@ public sealed class UsersController : ApiControllerBase
     public async Task<ActionResult<UserResponse>> UpdateStatus(Guid id, UpdateUserStatusRequest request, CancellationToken cancellationToken) =>
         FromResult(await _users.UpdateStatusAsync(id, request, cancellationToken));
 
+    [HttpPut("{id:guid}/administration")]
+    public async Task<ActionResult<UserResponse>> UpdateAdministration(Guid id, UpdateAdministrationRequest request,
+        CancellationToken cancellationToken) =>
+        FromResult(await _users.UpdateAdministrationAsync(id, request, cancellationToken));
+
     [HttpGet("me/preferences")]
     public async Task<ActionResult<PreferenceResponse>> GetPreferences(CancellationToken cancellationToken) =>
         FromResult(await _preferences.GetAsync(cancellationToken));

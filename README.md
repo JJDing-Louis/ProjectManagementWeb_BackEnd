@@ -2,6 +2,16 @@
 
 ProjectManagementWeb 的 ASP.NET Core Web API 後端 MVP。採前後端分離、分層架構、SQL Server 與 EF Core migrations，提供帳號驗證、系統／專案角色、專案、Task、留言、偏好與稽核功能。
 
+## 文件導覽
+
+| 文件 | 內容 |
+|---|---|
+| [API 清單](docs/ApiList.md) | 35 個 `/api/v1` endpoint、授權範圍、request 與 status code |
+| [系統架構](docs/Architecture.md) | C4 Level 3 Component Diagram、主要請求流程與 Compose 部署關係 |
+| [資料表 Schema](docs/TableSchema.md) | 20 張資料表的欄位、PK、FK、index、刪除行為與現行風險 |
+| [E-R Diagram](docs/E-R_Diagram.md) | Identity／RBAC、專案／Task 與系統紀錄關聯圖 |
+| [前端／API 契約](docs/FrontendContract.md) | Vue／TypeScript 型別、JWT、CSRF、refresh、rowversion 與錯誤處理 |
+
 ## 技術與架構
 
 - .NET 10、ASP.NET Core Controller-based Web API
@@ -18,6 +28,27 @@ Solution 依賴方向：
 Api -> Application -> Domain
 Api -> Infrastructure -> Application / Domain
 ```
+
+目前具體 use case 實作位於 Infrastructure services，透過 Application interfaces 提供給 Controller；Controller 不直接操作 EF Core。
+
+## 專案結構
+
+```text
+ProjectManagementWeb_BackEnd/
+├── src/
+│   ├── ProjectManagementWeb.Api/              # Controllers、HTTP pipeline、授權入口
+│   ├── ProjectManagementWeb.Application/      # Contracts、DTO、service interfaces
+│   ├── ProjectManagementWeb.Domain/           # Entities、roles、functions、enums
+│   └── ProjectManagementWeb.Infrastructure/   # EF Core、Identity、JWT、SMTP、services
+├── tests/
+│   ├── ProjectManagementWeb.UnitTests/
+│   └── ProjectManagementWeb.IntegrationTests/
+├── docs/                                      # API、架構、Schema、ER 與前端契約
+├── Dockerfile
+└── compose.yaml
+```
+
+API 使用傳統 `Program.Main` 進入點，不使用 Top-level statements；組態方法集中在 `Program` 類別中。
 
 ## 權限模型
 
@@ -78,6 +109,8 @@ dotnet ef migrations add MigrationName --project src/ProjectManagementWeb.Infras
 ```
 
 禁止使用 `EnsureCreated`。Project、Task、可修改留言使用 SQL Server `rowversion`，API 以 Base64 傳遞；版本衝突回傳 HTTP 409。
+
+目前 migration 共有 20 張資料表。值得注意的是，Identity 執行期要求 Email 唯一，但現行 migration 尚未對 `Accounts.NormalizedEmail` 建立 UNIQUE constraint；若要從資料庫層完整保證，需另建 migration。詳細限制請參閱 [TableSchema.md](docs/TableSchema.md)。
 
 ## 驗證
 

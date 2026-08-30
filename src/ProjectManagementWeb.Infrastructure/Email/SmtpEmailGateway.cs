@@ -25,7 +25,10 @@ internal sealed class SmtpEmailGateway : IEmailGateway
         message.Subject = subject;
         message.Body = new TextPart("html") { Text = body };
 
-        using var client = new SmtpClient();
+        using var client = new SmtpClient
+        {
+            CheckCertificateRevocation = _options.CheckCertificateRevocation
+        };
         await client.ConnectAsync(_options.Host, _options.Port, SecureSocketOptions.StartTls, cancellationToken);
         await client.AuthenticateAsync(_options.UserName, _options.Password, cancellationToken);
         await client.SendAsync(message, cancellationToken);

@@ -15,14 +15,16 @@ public sealed class AuthController : ApiControllerBase
 
     [AllowAnonymous, ValidateAntiForgeryToken]
     [HttpPost("register")]
-    public async Task<ActionResult<object>> Register(RegisterRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<RegisterResponse>> Register(
+        RegisterRequest request,
+        CancellationToken cancellationToken)
     {
-        ServiceResult<Guid> result = await _authService.RegisterAsync(request, cancellationToken);
+        ServiceResult<RegisterResponse> result = await _authService.RegisterAsync(request, cancellationToken);
         if (!result.IsSuccess)
         {
-            return FromResult(result);
+            return FromError(result.Error!);
         }
-        return StatusCode(StatusCodes.Status201Created, new { accountId = result.Value });
+        return StatusCode(StatusCodes.Status201Created, result.Value);
     }
 
     [AllowAnonymous, ValidateAntiForgeryToken]

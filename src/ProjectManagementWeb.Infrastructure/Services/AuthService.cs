@@ -43,11 +43,18 @@ internal sealed class AuthService : IAuthService
         _timeProvider = timeProvider;
     }
 
-    public async Task<ServiceResult<Guid>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
+    public async Task<ServiceResult<RegisterResponse>> RegisterAsync(
+        RegisterRequest request,
+        CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Account) || string.IsNullOrWhiteSpace(request.Email))
+        IReadOnlyDictionary<string, string[]> validationErrors = RegistrationValidator.Validate(request);
+        if (validationErrors.Count > 0)
         {
-            return ServiceResult<Guid>.Failure("validation_error", "帳號與 Email 為必填。", 400);
+            return ServiceResult<RegisterResponse>.Failure(
+                "validation_error",
+                "註冊資料有誤，請修正標示的欄位。",
+                400,
+                validationErrors);
         }
 
         var user = new ApplicationUser
@@ -55,28 +62,65 @@ internal sealed class AuthService : IAuthService
             Id = Guid.NewGuid(),
             UserName = request.Account.Trim(),
             Email = request.Email.Trim(),
-            Name = request.Name?.Trim(),
+            Name = request.Name.Trim(),
             IsEnabled = true,
             EmailConfirmed = false
         };
         IdentityResult created = await _userManager.CreateAsync(user, request.Password);
         if (!created.Succeeded)
         {
-            string message = string.Join(" ", created.Errors.Select(x => x.Description));
-            return ServiceResult<Guid>.Failure("registration_failed", message, 400);
+            return ServiceResult<RegisterResponse>.Failure(
+                "registration_failed",
+                "註冊資料無法建立，請修正標示的欄位。",
+                400,
+                MapIdentityErrors(created.Errors));
         }
 
         IdentityResult roleAdded = await _userManager.AddToRoleAsync(user, SystemRoles.Viewer);
         if (!roleAdded.Succeeded)
         {
             await _userManager.DeleteAsync(user);
-            return ServiceResult<Guid>.Failure("registration_failed", "無法建立預設角色。", 500);
+            return ServiceResult<RegisterResponse>.Failure("registration_failed", "無法建立預設角色。", 500);
         }
 
         _db.UserPreferences.Add(new UserPreference(user.Id));
         await _db.SaveChangesAsync(cancellationToken);
-        await SendVerificationEmailAsync(user, cancellationToken);
-        return ServiceResult<Guid>.Success(user.Id);
+        bool verificationEmailSent = await SendVerificationEmailAsync(user, cancellationToken);
+        return ServiceResult<RegisterResponse>.Success(new RegisterResponse(user.Id, verificationEmailSent));
+    }
+
+    private static IReadOnlyDictionary<string, string[]> MapIdentityErrors(IEnumerable<IdentityError> identityErrors)
+    {
+        var errors = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (IdentityError error in identityErrors)
+        {
+            (string field, string message) = error.Code switch
+            {
+                "DuplicateUserName" => ("account", "此帳號已被使用。"),
+                "InvalidUserName" => ("account", "帳號格式不正確。"),
+                "DuplicateEmail" => ("email", "此 Email 已被使用。"),
+                "InvalidEmail" => ("email", "Email 格式不正確。"),
+                "PasswordTooShort" => ("password", $"密碼至少需要 {RegistrationRules.PasswordMinLength} 個字元。"),
+                "PasswordRequiresUpper" => ("password", "密碼至少需要一個大寫英文字母。"),
+                "PasswordRequiresLower" => ("password", "密碼至少需要一個小寫英文字母。"),
+                "PasswordRequiresDigit" => ("password", "密碼至少需要一個數字。"),
+                "PasswordRequiresNonAlphanumeric" => ("password", "密碼至少需要一個特殊字元。"),
+                _ => ("registration", "註冊資料不符合系統規則。")
+            };
+            if (!errors.TryGetValue(field, out List<string>? messages))
+            {
+                messages = [];
+                errors[field] = messages;
+            }
+            if (!messages.Contains(message, StringComparer.Ordinal))
+            {
+                messages.Add(message);
+            }
+        }
+        return errors.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value.ToArray(),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<ServiceResult<AuthTokenResult>> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
@@ -224,7 +268,9 @@ internal sealed class AuthService : IAuthService
         return (role, functions);
     }
 
-    private async Task SendVerificationEmailAsync(ApplicationUser user, CancellationToken cancellationToken)
+    private async Task<bool> SendVerificationEmailAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken)
     {
         string rawToken = await _userManager.GenerateEmailConfirmationTokenAsync(user);
         string encodedToken = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(rawToken));
@@ -237,11 +283,14 @@ internal sealed class AuthService : IAuthService
         {
             await _emailGateway.SendAsync(email.Recipient, email.Subject, email.Body, cancellationToken);
             email.MarkSent(_timeProvider.GetUtcNow());
+            await _db.SaveChangesAsync(cancellationToken);
+            return true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             email.MarkFailed(exception.Message);
+            await _db.SaveChangesAsync(cancellationToken);
+            return false;
         }
-        await _db.SaveChangesAsync(cancellationToken);
     }
 }

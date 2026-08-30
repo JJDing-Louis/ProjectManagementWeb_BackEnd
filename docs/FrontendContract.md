@@ -101,8 +101,14 @@ export interface CurrentAccountResponse {
 export interface RegisterRequest {
   account: string
   password: string
+  confirmPassword: string
   email: string
-  name: string | null
+  name: string
+}
+
+export interface RegisterResponse {
+  accountId: Guid
+  verificationEmailSent: boolean
 }
 
 export interface LoginRequest {
@@ -120,7 +126,9 @@ export interface ResendEmailRequest {
 }
 ```
 
-註冊密碼目前由 Identity 要求至少 10 字元，且必須同時包含大寫、小寫、數字與非英數字元。帳號與 Email 必填，後端會在建立前 trim；前端可先做相同檢查改善 UX，但仍以 API 驗證結果為準。
+註冊欄位由後端統一驗證。密碼至少 10 字元，且必須同時包含大寫、小寫、數字與非英數字元；`confirmPassword` 必須與密碼相同。帳號、顯示名稱與 Email 必填，後端會在建立前 trim。驗證失敗時回傳 RFC 7807 Validation Problem Details，`errors` 依 `account`、`name`、`email`、`password`、`confirmPassword` 提供可顯示的中文訊息；前端應停留在註冊頁並顯示對應欄位錯誤。
+
+註冊成功後，`verificationEmailSent=false` 表示帳號已建立，但 SMTP 寄送失敗；前端應進入 Email 驗證畫面並顯示重新寄送提示，不得宣稱驗證信已成功寄出。
 
 Email confirm URL 中的 token 必須先以 URL-safe 方式帶到前端，再由 JSON body 原樣傳給 API。Resend 固定回傳成功語意，不應以畫面差異洩漏帳號是否存在。
 

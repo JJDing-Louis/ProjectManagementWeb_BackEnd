@@ -13,14 +13,18 @@ public abstract class ApiControllerBase : ControllerBase
             return Ok(result.Value);
         }
 
-        ServiceError error = result.Error!;
-        var details = new ProblemDetails
-        {
-            Status = error.StatusCode,
-            Title = error.Message,
-            Type = $"https://httpstatuses.com/{error.StatusCode}",
-            Instance = HttpContext.Request.Path
-        };
+        return FromError(result.Error!);
+    }
+
+    protected ObjectResult FromError(ServiceError error)
+    {
+        ProblemDetails details = error.FieldErrors is { Count: > 0 }
+            ? new ValidationProblemDetails(error.FieldErrors.ToDictionary(pair => pair.Key, pair => pair.Value))
+            : new ProblemDetails();
+        details.Status = error.StatusCode;
+        details.Title = error.Message;
+        details.Type = $"https://httpstatuses.com/{error.StatusCode}";
+        details.Instance = HttpContext.Request.Path;
         details.Extensions["code"] = error.Code;
         details.Extensions["traceId"] = HttpContext.TraceIdentifier;
         return new ObjectResult(details) { StatusCode = error.StatusCode };

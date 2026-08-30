@@ -33,8 +33,9 @@ public static class DependencyInjection
         services.AddIdentityCore<ApplicationUser>(options =>
             {
                 options.User.RequireUniqueEmail = true;
+                options.User.AllowedUserNameCharacters = RegistrationRules.AllowedAccountCharacters;
                 options.SignIn.RequireConfirmedEmail = false;
-                options.Password.RequiredLength = 10;
+                options.Password.RequiredLength = RegistrationRules.PasswordMinLength;
                 options.Password.RequireDigit = true;
                 options.Password.RequireLowercase = true;
                 options.Password.RequireUppercase = true;

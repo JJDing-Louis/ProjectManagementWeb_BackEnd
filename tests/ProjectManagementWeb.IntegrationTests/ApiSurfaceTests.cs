@@ -53,6 +53,37 @@ public sealed class ApiSurfaceTests
     }
 
     [Test]
+    public async Task 註冊欄位不正確時應回傳欄位錯誤ProblemDetails()
+    {
+        JsonElement csrf = await _client.GetFromJsonAsync<JsonElement>("/api/v1/security/csrf-token");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/register")
+        {
+            Content = JsonContent.Create(new
+            {
+                account = "invalid account",
+                password = "weak",
+                confirmPassword = "different",
+                email = "invalid-email",
+                name = " "
+            })
+        };
+        request.Headers.Add("X-CSRF-TOKEN", csrf.GetProperty("token").GetString());
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+        string body = await response.Content.ReadAsStringAsync();
+        JsonElement problem = JsonDocument.Parse(body).RootElement;
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
+        problem.GetProperty("code").GetString().Should().Be("validation_error");
+        JsonElement errors = problem.GetProperty("errors");
+        errors.TryGetProperty("account", out _).Should().BeTrue();
+        errors.TryGetProperty("name", out _).Should().BeTrue();
+        errors.TryGetProperty("email", out _).Should().BeTrue();
+        errors.TryGetProperty("password", out _).Should().BeTrue();
+        errors.TryGetProperty("confirmPassword", out _).Should().BeTrue();
+    }
+
+    [Test]
     public async Task OpenApi文件應包含Bearer與核心端點()
     {
         string document = await _client.GetStringAsync("/openapi/v1.json");

@@ -10,4 +10,5 @@ public sealed class SmtpOptions
     public string FromAddress { get; set; } = string.Empty;
     public string FromName { get; set; } = "Project Management Web";
     public string FrontendBaseUrl { get; set; } = "http://localhost:5173";
+    public bool CheckCertificateRevocation { get; set; } = true;
 }

@@ -21,7 +21,7 @@
 | Method | Route | Auth | CSRF | Request | Success | 說明 |
 |---|---|---:|---:|---|---|---|
 | GET | `/api/v1/security/csrf-token` | 否 | 否 | 無 | 200 `{ token }` | 建立 antiforgery cookie 並回傳 request token |
-| POST | `/api/v1/auth/register` | 否 | 是 | `RegisterRequest` | 201 `{ accountId }` | 建立帳號、Viewer 角色與偏好；寄信失敗不回滾帳號 |
+| POST | `/api/v1/auth/register` | 否 | 是 | `RegisterRequest` | 201 `{ accountId, verificationEmailSent }` | 建立帳號、Viewer 角色與偏好；寄信失敗不回滾帳號，並以旗標通知前端 |
 | POST | `/api/v1/auth/login` | 否 | 是 | `LoginRequest` | 200 access token；設定 refresh cookie | Email 未驗證仍可登入，但有效角色固定為 Viewer |
 | POST | `/api/v1/auth/refresh` | 否 | 是 | Refresh Cookie | 200 access token；輪替 refresh cookie | 舊 token 重用時撤銷同一 family |
 | POST | `/api/v1/auth/logout` | 否 | 是 | Refresh Cookie，可省略 | 204 | 撤銷目前 refresh token 並刪除 cookie |

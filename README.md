@@ -77,6 +77,10 @@ Development 預設提供：
 - OpenAPI：`/openapi/v1.json`
 - Swagger UI：`/swagger`
 
+本機 Development 的 `Smtp:CheckCertificateRevocation` 預設為 `false`，用來避開部分 macOS／IDE 環境對 Gmail 憑證鏈回報 `incomplete certificate revocation check` 的問題。這只略過撤銷狀態查詢，TLS 憑證鏈與主機名稱仍會驗證。非 Development 環境預設為 `true`；正式環境不應為了排除連線問題而關閉。
+
+Gmail SMTP 必須使用已啟用兩步驟驗證之帳號產生的應用程式密碼，不可使用一般登入密碼。IDE 不會自動載入 Compose 的 `.env`，啟動設定仍需提供 `Smtp__UserName`、`Smtp__Password` 與 `Smtp__FromAddress`。
+
 Production 預設不公開 OpenAPI；若確有需要，設定 `OpenApi__Enabled=true`。
 
 ## Docker Compose

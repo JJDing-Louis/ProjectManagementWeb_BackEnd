@@ -47,6 +47,7 @@ public static class DependencyInjection
             .AddDefaultTokenProviders();
 
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton(new BootstrapAdminPolicy(configuration["BootstrapAdmin:Account"]));
         services.AddSingleton<JwtTokenIssuer>();
         services.AddSingleton<ITokenIssuer>(provider => provider.GetRequiredService<JwtTokenIssuer>());
         services.AddSingleton<IConfigureOptions<JwtBearerOptions>, JwtBearerOptionsSetup>();

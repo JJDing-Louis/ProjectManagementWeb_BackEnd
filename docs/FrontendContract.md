@@ -150,6 +150,7 @@ export interface UserResponse {
   emailConfirmed: boolean
   isEnabled: boolean
   role: string
+  isBootstrapAdmin: boolean
 }
 
 export interface RoleResponse {

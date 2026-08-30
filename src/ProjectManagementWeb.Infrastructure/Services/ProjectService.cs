@@ -2,6 +2,7 @@ using System.Data;
 using Microsoft.EntityFrameworkCore;
 using ProjectManagementWeb.Application.Common;
 using ProjectManagementWeb.Application.Projects;
+using ProjectManagementWeb.Application.Users;
 using ProjectManagementWeb.Domain.Constants;
 using ProjectManagementWeb.Domain.Entities;
 using ProjectManagementWeb.Domain.Enums;
@@ -17,15 +18,17 @@ internal sealed class ProjectService : IProjectService
     private readonly ServiceSupport _support;
     private readonly TimeProvider _timeProvider;
     private readonly IBusinessCodeGenerator _codeGenerator;
+    private readonly BootstrapAdminPolicy _bootstrapAdmin;
 
     public ProjectService(ApplicationDbContext db, ICurrentUser currentUser, ServiceSupport support,
-        TimeProvider timeProvider, IBusinessCodeGenerator codeGenerator)
+        TimeProvider timeProvider, IBusinessCodeGenerator codeGenerator, BootstrapAdminPolicy bootstrapAdmin)
     {
         _db = db;
         _currentUser = currentUser;
         _support = support;
         _timeProvider = timeProvider;
         _codeGenerator = codeGenerator;
+        _bootstrapAdmin = bootstrapAdmin;
     }
 
     public async Task<ServiceResult<PagedResult<ProjectResponse>>> GetProjectsAsync(ProjectQuery query, CancellationToken cancellationToken)
@@ -178,6 +181,10 @@ internal sealed class ProjectService : IProjectService
         int pageSize = Math.Clamp(query.PageSize, 1, 100);
         IQueryable<ApplicationUser> candidates = _db.Users.AsNoTracking().Where(user => user.IsEnabled &&
             !_db.ProjectMembers.Any(member => member.ProjectId == projectId && member.AccountId == user.Id));
+        if (_bootstrapAdmin.NormalizedAccount is string normalizedBootstrapAdmin)
+        {
+            candidates = candidates.Where(user => user.NormalizedUserName != normalizedBootstrapAdmin);
+        }
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             string search = query.Search.Trim();
@@ -204,10 +211,16 @@ internal sealed class ProjectService : IProjectService
         {
             return ServiceResult<ProjectMemberResponse>.Failure("invalid_project_roles", "至少指定一個有效的專案角色。", 422);
         }
-        bool validUser = await _db.Users.AnyAsync(x => x.Id == request.AccountId && x.IsEnabled, cancellationToken);
-        if (!validUser)
+        ApplicationUser? account = await _db.Users.SingleOrDefaultAsync(
+            x => x.Id == request.AccountId && x.IsEnabled, cancellationToken);
+        if (account is null)
         {
             return ServiceResult<ProjectMemberResponse>.Failure("invalid_account", "帳號不存在或已停用。", 422);
+        }
+        if (_bootstrapAdmin.IsBootstrapAdmin(account.UserName))
+        {
+            return ServiceResult<ProjectMemberResponse>.Failure(
+                "bootstrap_admin_not_project_member", "系統預設 Admin 不可加入專案成員。", 422);
         }
         if (await _db.ProjectMembers.AnyAsync(x => x.ProjectId == projectId && x.AccountId == request.AccountId, cancellationToken))
         {

@@ -94,7 +94,7 @@ docker compose up --build
 
 啟動順序是 SQL Server health check、建立 migration／API 專用登入、套用 EF migration、啟動 API。SA 只用於初始化；migration 使用 `pmw_migrator`，API 使用只有資料讀寫權限的 `pmw_app`。
 
-首次部署可透過 `BOOTSTRAP_ADMIN_ACCOUNT`、`BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_PASSWORD` 建立第一位已驗證 Admin；帳號存在後即不再修改。完成初始化後應從部署環境移除 Bootstrap 密碼。
+首次部署可透過 `BOOTSTRAP_ADMIN_ACCOUNT`、`BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_PASSWORD` 建立第一位已驗證 Admin；後續啟動會確保此帳號維持啟用且系統角色固定為 `Admin`，但不會改動其他帳號資料。完成初始化後仍須保留 Bootstrap 帳號設定供保護規則識別，密碼則應從部署環境移除。
 
 Apple Silicon 使用 `platform: linux/amd64` 執行 SQL Server 2022 Linux image，仰賴 Docker 的 x64 模擬；Microsoft 不正式支援此模擬環境，因此正式環境應使用受支援的 x64 Linux 主機或受管理 SQL Server。
 

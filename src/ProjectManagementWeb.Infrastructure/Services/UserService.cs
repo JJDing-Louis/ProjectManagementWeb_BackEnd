@@ -17,9 +17,11 @@ internal sealed class UserService : IUserService
     private readonly ICurrentUser _currentUser;
     private readonly ServiceSupport _support;
     private readonly TimeProvider _timeProvider;
+    private readonly BootstrapAdminPolicy _bootstrapAdmin;
 
     public UserService(ApplicationDbContext db, UserManager<ApplicationUser> userManager,
-        RoleManager<ApplicationRole> roleManager, ICurrentUser currentUser, ServiceSupport support, TimeProvider timeProvider)
+        RoleManager<ApplicationRole> roleManager, ICurrentUser currentUser, ServiceSupport support,
+        TimeProvider timeProvider, BootstrapAdminPolicy bootstrapAdmin)
     {
         _db = db;
         _userManager = userManager;
@@ -27,6 +29,7 @@ internal sealed class UserService : IUserService
         _currentUser = currentUser;
         _support = support;
         _timeProvider = timeProvider;
+        _bootstrapAdmin = bootstrapAdmin;
     }
 
     public async Task<ServiceResult<PagedResult<UserResponse>>> GetUsersAsync(UserQuery query, CancellationToken cancellationToken)
@@ -88,6 +91,10 @@ internal sealed class UserService : IUserService
         {
             return ServiceResult<UserResponse>.Failure("not_found", "找不到帳號或角色。", 404);
         }
+        if (_bootstrapAdmin.IsBootstrapAdmin(user.UserName))
+        {
+            return BootstrapAdminImmutable();
+        }
         if (!user.EmailConfirmed && role.Name != SystemRoles.Viewer)
         {
             return ServiceResult<UserResponse>.Failure("email_not_confirmed", "Email 尚未驗證，只能使用 Viewer。", 422);
@@ -133,6 +140,10 @@ internal sealed class UserService : IUserService
         {
             return ServiceResult<UserResponse>.Failure("not_found", "找不到帳號。", 404);
         }
+        if (_bootstrapAdmin.IsBootstrapAdmin(user.UserName))
+        {
+            return BootstrapAdminImmutable();
+        }
         await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         IList<string> roles = await _userManager.GetRolesAsync(user);
         if (!request.IsEnabled && roles.SingleOrDefault() == SystemRoles.Admin && await CountAdminsAsync(cancellationToken) <= 1)
@@ -164,6 +175,10 @@ internal sealed class UserService : IUserService
         if (user is null || role?.Name is null)
         {
             return ServiceResult<UserResponse>.Failure("not_found", "找不到帳號或角色。", 404);
+        }
+        if (_bootstrapAdmin.IsBootstrapAdmin(user.UserName))
+        {
+            return BootstrapAdminImmutable();
         }
         if (!user.EmailConfirmed && role.Name != SystemRoles.Viewer)
         {
@@ -234,8 +249,12 @@ internal sealed class UserService : IUserService
     {
         IList<string> roles = await _userManager.GetRolesAsync(user);
         return new UserResponse(user.Id, user.UserName ?? string.Empty, user.Email ?? string.Empty,
-            user.Name, user.EmailConfirmed, user.IsEnabled, roles.SingleOrDefault() ?? SystemRoles.Viewer);
+            user.Name, user.EmailConfirmed, user.IsEnabled, roles.SingleOrDefault() ?? SystemRoles.Viewer,
+            _bootstrapAdmin.IsBootstrapAdmin(user.UserName));
     }
+
+    private static ServiceResult<UserResponse> BootstrapAdminImmutable() =>
+        ServiceResult<UserResponse>.Failure("bootstrap_admin_immutable", "系統預設 Admin 不可修改。", 409);
 
     private async Task<int> CountAdminsAsync(CancellationToken cancellationToken)
     {

@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -16,7 +17,7 @@ public static class DatabaseBootstrapper
         string? account = configuration["BootstrapAdmin:Account"];
         string? email = configuration["BootstrapAdmin:Email"];
         string? password = configuration["BootstrapAdmin:Password"];
-        if (string.IsNullOrWhiteSpace(account) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        if (string.IsNullOrWhiteSpace(account))
         {
             return;
         }
@@ -24,7 +25,13 @@ public static class DatabaseBootstrapper
         await using AsyncServiceScope scope = services.CreateAsyncScope();
         UserManager<ApplicationUser> userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        if (await userManager.FindByNameAsync(account) is not null)
+        ApplicationUser? existingUser = await userManager.FindByNameAsync(account);
+        if (existingUser is not null)
+        {
+            await EnsureAdminRoleAndEnabledAsync(userManager, db, existingUser, cancellationToken);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             return;
         }
@@ -52,5 +59,52 @@ public static class DatabaseBootstrapper
 
         db.UserPreferences.Add(new UserPreference(user.Id));
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task EnsureAdminRoleAndEnabledAsync(
+        UserManager<ApplicationUser> userManager, ApplicationDbContext db, ApplicationUser user,
+        CancellationToken cancellationToken)
+    {
+        IList<string> currentRoles = await userManager.GetRolesAsync(user);
+        bool needsAdminRole = !currentRoles.Contains(SystemRoles.Admin, StringComparer.Ordinal);
+        bool needsEnabled = !user.IsEnabled;
+        string[] nonAdminRoles = currentRoles
+            .Where(role => !string.Equals(role, SystemRoles.Admin, StringComparison.Ordinal))
+            .ToArray();
+        if (nonAdminRoles.Length == 0 && !needsAdminRole && !needsEnabled)
+        {
+            return;
+        }
+
+        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        if (nonAdminRoles.Length > 0)
+        {
+            IdentityResult removed = await userManager.RemoveFromRolesAsync(user, nonAdminRoles);
+            if (!removed.Succeeded)
+            {
+                throw new InvalidOperationException("Bootstrap Admin 無法移除非 Admin 角色。");
+            }
+        }
+
+        if (needsAdminRole)
+        {
+            IdentityResult roleAdded = await userManager.AddToRoleAsync(user, SystemRoles.Admin);
+            if (!roleAdded.Succeeded)
+            {
+                throw new InvalidOperationException("Bootstrap Admin 無法取得 Admin 角色。");
+            }
+        }
+
+        if (needsEnabled)
+        {
+            user.IsEnabled = true;
+            IdentityResult updated = await userManager.UpdateAsync(user);
+            if (!updated.Succeeded)
+            {
+                throw new InvalidOperationException("Bootstrap Admin 無法恢復啟用狀態。");
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
     }
 }

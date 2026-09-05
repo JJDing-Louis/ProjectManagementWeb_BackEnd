@@ -102,6 +102,7 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(4000);
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
+            entity.Property(x => x.VersionNumber).HasDefaultValue(1);
             entity.Property(x => x.RowVersion).IsRowVersion();
             entity.HasIndex(x => x.Code).IsUnique().HasFilter("[DeletedAt] IS NULL");
             entity.HasIndex(x => new { x.OwnerAccountId, x.Status });

@@ -47,9 +47,9 @@
 | Method | Route | Function／資源範圍 | Request | Success | 說明 |
 |---|---|---|---|---|---|
 | GET | `/api/v1/projects` | `projects.read`；非全域管理者只看所屬專案 | `ProjectQuery` | 200 `PagedResult<ProjectResponse>` | 可依關鍵字、狀態、頁碼篩選 |
-| POST | `/api/v1/projects` | `projects.create` | `CreateProjectRequest` | 201 `ProjectResponse` | Code 由後端產生；Owner 必須是有效帳號並自動取得 ProjectManager |
+| POST | `/api/v1/projects` | `projects.create` | `CreateProjectRequest` | 201 `ProjectResponse` | Code 由後端產生；Owner 必須是有效帳號並自動取得 ProjectManager；`versionNumber` 從 1 開始 |
 | GET | `/api/v1/projects/{id}` | 全域管理或專案成員 | 無 | 200 `ProjectResponse` | 軟刪除專案由 EF query filter 排除 |
-| PUT | `/api/v1/projects/{id}` | 非 Viewer，且為全域管理或該專案 ProjectManager | `UpdateProjectRequest` | 200 `ProjectResponse` | Owner 必須是成員；驗證 `rowVersion` |
+| PUT | `/api/v1/projects/{id}` | 非 Viewer，且為全域管理或該專案 ProjectManager | `UpdateProjectRequest` | 200 `ProjectResponse` | Owner 必須是成員；驗證 `rowVersion`；成功更新專案基本資料後 `versionNumber` 加 1 |
 | GET | `/api/v1/projects/roles` | 任一已登入帳號 | 無 | 200 `ProjectRoleResponse[]` | 回傳固定專案角色 |
 | GET | `/api/v1/projects/{id}/members` | 全域管理或專案成員 | 無 | 200 `ProjectMemberResponse[]` | 每位成員包含多筆專案角色 |
 | GET | `/api/v1/projects/{id}/member-candidates` | 非 Viewer，且為全域管理或 ProjectManager | `search`、`page`、`pageSize` | 200 `PagedResult<ProjectMemberCandidateResponse>` | 僅回傳帳號 ID、帳號及姓名，並排除既有成員與系統預設 Admin |

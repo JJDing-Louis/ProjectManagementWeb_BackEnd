@@ -123,6 +123,7 @@ ASP.NET Core Identity 帳號資料。
 | `Description` | `nvarchar(4000)` | 是 |  | 說明 |
 | `OwnerAccountId` | `uniqueidentifier` | 否 | FK → `Accounts.Id`、INDEX with Status | Owner，刪除採 Restrict |
 | `Status` | `nvarchar(30)` | 否 |  | `Pending`、`Active`、`Completed`、`Archived` |
+| `VersionNumber` | `int` | 否 | DEFAULT 1 | 使用者可讀的專案版本；每次更新專案基本資料時遞增 |
 | `CreatedAt` | `datetimeoffset` | 否 |  | 建立時間 |
 | `UpdatedAt` | `datetimeoffset` | 否 |  | 更新時間 |
 | `DeletedAt` | `datetimeoffset` | 是 | query filter | 軟刪除時間 |

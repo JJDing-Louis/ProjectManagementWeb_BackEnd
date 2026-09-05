@@ -7,7 +7,7 @@ public sealed record ProjectQuery(string? Search, ProjectStatus? Status, int Pag
 public sealed record CreateProjectRequest(string Name, string? Description, Guid OwnerAccountId);
 public sealed record UpdateProjectRequest(string Name, string? Description, Guid OwnerAccountId, ProjectStatus Status, string RowVersion);
 public sealed record ProjectResponse(Guid Id, string Code, string Name, string? Description, Guid OwnerAccountId, ProjectStatus Status,
-    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string RowVersion);
+    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int VersionNumber, string RowVersion);
 public sealed record SaveProjectMemberRequest(Guid AccountId, IReadOnlyCollection<Guid> ProjectRoleIds);
 public sealed record UpdateProjectMemberRequest(IReadOnlyCollection<Guid> ProjectRoleIds);
 public sealed record ProjectMemberResponse(Guid AccountId, string Account, string? Name, IReadOnlyCollection<ProjectRoleResponse> Roles);

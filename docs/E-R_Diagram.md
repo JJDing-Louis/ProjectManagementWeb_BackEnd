@@ -89,6 +89,7 @@ erDiagram
         nvarchar Code UK
         uniqueidentifier OwnerAccountId FK
         nvarchar Status
+        int VersionNumber
         rowversion RowVersion
         datetimeoffset DeletedAt
     }

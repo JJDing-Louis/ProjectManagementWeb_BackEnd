@@ -144,10 +144,10 @@ internal sealed class ProjectService : IProjectService
         {
             _db.ProjectMemberRoles.Add(new ProjectMemberRole(id, request.OwnerAccountId, managerRoleId));
         }
-        var before = new { project.Name, project.Description, project.OwnerAccountId, project.Status };
+        var before = new { project.Name, project.Description, project.OwnerAccountId, project.Status, project.VersionNumber };
         project.Update(request.Name.Trim(), request.Description?.Trim(), request.OwnerAccountId, request.Status, _timeProvider.GetUtcNow());
         _support.AddAudit("Update", "Project", id.ToString(), before,
-            new { project.Name, project.Description, project.OwnerAccountId, project.Status }, _timeProvider.GetUtcNow());
+            new { project.Name, project.Description, project.OwnerAccountId, project.Status, project.VersionNumber }, _timeProvider.GetUtcNow());
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
@@ -322,5 +322,6 @@ internal sealed class ProjectService : IProjectService
     }
 
     private static ProjectResponse Map(Project project) => new(project.Id, project.Code, project.Name, project.Description,
-        project.OwnerAccountId, project.Status, project.CreatedAt, project.UpdatedAt, Convert.ToBase64String(project.RowVersion));
+        project.OwnerAccountId, project.Status, project.CreatedAt, project.UpdatedAt, project.VersionNumber,
+        Convert.ToBase64String(project.RowVersion));
 }

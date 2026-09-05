@@ -46,4 +46,14 @@ public sealed class DatabaseModelTests
         primaryKey.Properties.Select(property => property.Name).Should().Equal(
             nameof(BusinessCodeCounter.CodeType), nameof(BusinessCodeCounter.BusinessDate));
     }
+
+    [Test]
+    public void Project版本欄位應以一作為預設值()
+    {
+        using ApplicationDbContext context = CreateContext();
+        IProperty versionProperty = context.Model.FindEntityType(typeof(Project))!
+            .FindProperty(nameof(Project.VersionNumber))!;
+
+        versionProperty.GetDefaultValue().Should().Be(1);
+    }
 }

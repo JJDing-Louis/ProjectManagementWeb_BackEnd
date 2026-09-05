@@ -58,4 +58,19 @@ public sealed class DomainEntityTests
         task.Status.Should().Be(targetStatus);
         task.UpdatedAt.Should().Be(now.AddMinutes(1));
     }
+
+    [Test]
+    public void Project建立時版本應為一且每次更新基本資料後遞增()
+    {
+        DateTimeOffset now = new(2026, 8, 31, 0, 0, 0, TimeSpan.Zero);
+        Guid ownerId = Guid.NewGuid();
+        var project = new Project(Guid.NewGuid(), "PRJ-001", "專案", null, ownerId, now);
+
+        project.VersionNumber.Should().Be(1);
+
+        project.Update("專案二", "說明", ownerId, ProjectStatus.Active, now.AddMinutes(1));
+
+        project.VersionNumber.Should().Be(2);
+        project.UpdatedAt.Should().Be(now.AddMinutes(1));
+    }
 }

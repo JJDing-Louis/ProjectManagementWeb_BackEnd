@@ -218,8 +218,12 @@ export interface ProjectResponse {
   status: ProjectStatus
   createdAt: IsoDateTime
   updatedAt: IsoDateTime
+  versionNumber: number
   rowVersion: RowVersion
 }
+
+- `versionNumber` 僅在專案基本資料更新成功後遞增；成員與 Task 異動不影響此版本。
+- `rowVersion` 仍用於並行控制，前端不可用 `versionNumber` 取代更新請求中的 `rowVersion`。
 
 export interface ProjectRoleResponse {
   id: Guid

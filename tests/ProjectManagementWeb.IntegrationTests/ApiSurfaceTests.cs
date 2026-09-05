@@ -100,5 +100,8 @@ public sealed class ApiSurfaceTests
             .Should().BeFalse();
         schemas.GetProperty("CreateTaskRequest").GetProperty("properties").TryGetProperty("code", out _)
             .Should().BeFalse();
+        JsonElement projectResponseProperties = schemas.GetProperty("ProjectResponse").GetProperty("properties");
+        projectResponseProperties.TryGetProperty("versionNumber", out _).Should().BeTrue();
+        projectResponseProperties.TryGetProperty("rowVersion", out _).Should().BeTrue();
     }
 }

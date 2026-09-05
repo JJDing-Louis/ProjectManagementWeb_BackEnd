@@ -24,6 +24,7 @@ public sealed class Project : AuditableEntity
     public string? Description { get; private set; }
     public Guid OwnerAccountId { get; private set; }
     public ProjectStatus Status { get; private set; }
+    public int VersionNumber { get; private set; } = 1;
     public DateTimeOffset? DeletedAt { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
@@ -33,6 +34,7 @@ public sealed class Project : AuditableEntity
         Description = description;
         OwnerAccountId = ownerAccountId;
         Status = status;
+        VersionNumber++;
         MarkUpdated(now);
     }
 

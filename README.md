@@ -6,9 +6,9 @@ ProjectManagementWeb 的 ASP.NET Core Web API 後端 MVP。採前後端分離、
 
 | 文件 | 內容 |
 |---|---|
-| [API 清單](docs/ApiList.md) | 37 個 `/api/v1` endpoint、授權範圍、request 與 status code |
+| [API 清單](docs/ApiList.md) | 38 個 `/api/v1` endpoint、授權範圍、request 與 status code |
 | [系統架構](docs/Architecture.md) | C4 Level 3 Component Diagram、主要請求流程與 Compose 部署關係 |
-| [資料表 Schema](docs/TableSchema.md) | 21 張資料表的欄位、PK、FK、index、刪除行為與現行風險 |
+| [資料表 Schema](docs/TableSchema.md) | 26 張應用資料表的欄位、PK、FK、index、刪除行為與現行風險；另說明 Hangfire SQL schema |
 | [E-R Diagram](docs/E-R_Diagram.md) | Identity／RBAC、專案／Task 與系統紀錄關聯圖 |
 | [前端／API 契約](docs/FrontendContract.md) | Vue／TypeScript 型別、JWT、CSRF、refresh、rowversion 與錯誤處理 |
 

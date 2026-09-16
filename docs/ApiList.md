@@ -47,9 +47,10 @@
 | Method | Route | Function／資源範圍 | Request | Success | 說明 |
 |---|---|---|---|---|---|
 | GET | `/api/v1/projects` | `projects.read`；非全域管理者只看所屬專案 | `ProjectQuery` | 200 `PagedResult<ProjectResponse>` | 可依關鍵字、狀態、頁碼篩選 |
-| POST | `/api/v1/projects` | `projects.create` | `CreateProjectRequest` | 201 `ProjectResponse` | Code 由後端產生；Owner 必須是有效帳號並自動取得 ProjectManager；`versionNumber` 從 1 開始 |
+| POST | `/api/v1/projects` | `projects.create` | `CreateProjectRequest` | 201 `ProjectResponse` | Code 由後端產生；Owner 必須是已啟用、Email 已驗證的 `Administrator`；`timeZoneId` 必須是合法 IANA ID；Owner 自動成為 ProjectManager；`versionNumber` 從 1 開始 |
 | GET | `/api/v1/projects/{id}` | 全域管理或專案成員 | 無 | 200 `ProjectResponse` | 軟刪除專案由 EF query filter 排除 |
-| PUT | `/api/v1/projects/{id}` | 非 Viewer，且為全域管理或該專案 ProjectManager | `UpdateProjectRequest` | 200 `ProjectResponse` | Owner 必須是成員；驗證 `rowVersion`；成功更新專案基本資料後 `versionNumber` 加 1 |
+| PUT | `/api/v1/projects/{id}` | 非 Viewer，且為全域管理或該專案 ProjectManager | `UpdateProjectRequest` | 200 `ProjectResponse` | Owner 必須是已啟用、Email 已驗證的 `Administrator` 且已是成員；驗證合法 IANA `timeZoneId` 與 `rowVersion`；成功後 `versionNumber` 加 1 |
+| DELETE | `/api/v1/projects/{id}?rowVersion=...` | 系統角色 `Administrator` 或 `Admin` | query `rowVersion` | 204 | 軟刪除 Project，記錄 `DeletedAt`、`DeletedByAccountId` 與 AuditLog；子資料保留並由 Project scope 隱藏 |
 | GET | `/api/v1/projects/roles` | 任一已登入帳號 | 無 | 200 `ProjectRoleResponse[]` | 回傳固定專案角色 |
 | GET | `/api/v1/projects/{id}/members` | 全域管理或專案成員 | 無 | 200 `ProjectMemberResponse[]` | 每位成員包含多筆專案角色 |
 | GET | `/api/v1/projects/{id}/member-candidates` | 非 Viewer，且為全域管理或 ProjectManager | `search`、`page`、`pageSize` | 200 `PagedResult<ProjectMemberCandidateResponse>` | 僅回傳帳號 ID、帳號及姓名，並排除既有成員與系統預設 Admin |

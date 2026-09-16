@@ -199,12 +199,14 @@ export interface CreateProjectRequest {
   name: string
   description: string | null
   ownerAccountId: Guid
+  timeZoneId: string
 }
 
 export interface UpdateProjectRequest {
   name: string
   description: string | null
   ownerAccountId: Guid
+  timeZoneId: string
   status: ProjectStatus
   rowVersion: RowVersion
 }
@@ -215,6 +217,7 @@ export interface ProjectResponse {
   name: string
   description: string | null
   ownerAccountId: Guid
+  timeZoneId: string
   status: ProjectStatus
   createdAt: IsoDateTime
   updatedAt: IsoDateTime
@@ -255,11 +258,14 @@ export interface UpdateProjectMemberRequest {
 ```
 
 - 建立專案時不傳 `code`；後端依 UTC 日期產生 `PRJ-YYYYMMDD######`，Project 每日獨立從 `000001` 起算。
+- `timeZoneId` 為必填且必須是合法 IANA timezone ID；建立時不可省略或套用前端預設值。
+- Owner 必須是已啟用、Email 已驗證且系統角色恰為 `Administrator` 的帳號；更新 Owner 時還必須已是該 Project 成員。
 - 建立專案後，Owner 會自動成為 member 並取得 `ProjectManager`；移交 Owner 時亦會在同一交易補上新 Owner 的 `ProjectManager`。
 - 成員候選人使用 `GET /projects/{id}/member-candidates`，分頁結果只揭露 `accountId`、`account`、`name`。
 - 成員角色 UI 必須使用複選；`projectRoleIds` 至少一筆。PUT 是完整取代角色集合，不是增量 patch。
 - Owner 必須維持專案成員身分；移除 Owner 前要先透過 Project PUT 移交。
 - Viewer 即使資料中具有 ProjectManager 角色，仍不能顯示或執行寫入操作。
+- Project 軟刪除使用 `DELETE /projects/{id}?rowVersion=...`；只有 `Administrator` 與 `Admin` 可執行，成功後子資料保留但不再由一般 Project scope 顯示。
 
 ## Task 契約
 

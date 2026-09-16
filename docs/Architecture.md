@@ -6,38 +6,39 @@
 
 ```mermaid
 flowchart LR
-    spa[Vue SPA<br/>外部前端應用]
-    smtp[Gmail SMTP<br/>外部郵件服務]
+    spa[Vue SPA／外部前端應用]
+    smtp[Gmail SMTP／外部郵件服務]
     sql[(SQL Server 2022)]
 
     subgraph api[ProjectManagementWeb.Api]
-        program[Program<br/>DI、Middleware、CORS、OpenAPI]
-        controllers[Controllers<br/>HTTP 路由、Model Binding、授權入口]
-        exceptionHandler[ApiExceptionHandler<br/>Problem Details]
-        currentUser[HttpCurrentUser<br/>解析 JWT Claims]
+        program[Program／DI、Middleware、CORS、OpenAPI]
+        controllers[Controllers／HTTP 路由、Model Binding、授權入口]
+        exceptionHandler[ApiExceptionHandler／Problem Details]
+        currentUser[HttpCurrentUser／解析 JWT Claims]
     end
 
     subgraph application[ProjectManagementWeb.Application]
-        contracts[Contracts 與 DTOs<br/>Request、Response、PagedResult]
-        ports[Application Interfaces<br/>Auth、User、Project、Task、Comment、Preference<br/>IBusinessCodeGenerator]
-        results[ServiceResult<br/>ServiceError]
+        contracts[Contracts 與 DTOs／Request、Response、PagedResult]
+        ports[Application Interfaces／Auth、User、Project、Task、Comment、Preference、Reminder／IBusinessCodeGenerator、IClientAddressProvider]
+        results[ServiceResult／ServiceError]
     end
 
     subgraph infrastructure[ProjectManagementWeb.Infrastructure]
-        services[Application Services<br/>Auth、User、Project、Task、Comment、Preference]
-        support[ServiceSupport<br/>Function 與專案資源授權]
-        identity[ASP.NET Core Identity<br/>UserManager、RoleManager]
-        token[JWT 與 Refresh Token<br/>JwtTokenIssuer、Bearer Validation]
+        services[Application Services／Auth、User、Project、Task、Comment、Preference、Reminder]
+        reminderJobs[ReminderJobs／Hangfire Scanner / Sender]
+        support[ServiceSupport／Function 與專案資源授權]
+        identity[ASP.NET Core Identity／UserManager、RoleManager]
+        token[JWT 與 Refresh Token／JwtTokenIssuer、Bearer Validation]
         email[SmtpEmailGateway]
-        dbContext[ApplicationDbContext<br/>EF Core Mapping、Query Filters]
-        migrations[EF Core Migrations<br/>Schema 版本來源]
-        bootstrap[DatabaseBootstrapper<br/>初始 Admin]
-        codeGenerator[BusinessCodeGenerator<br/>UTC 每日流水號與交易鎖]
+        dbContext[ApplicationDbContext／EF Core Mapping、Query Filters]
+        migrations[EF Core Migrations／Schema 版本來源]
+        bootstrap[DatabaseBootstrapper／初始 Admin]
+        codeGenerator[BusinessCodeGenerator／UTC 每日流水號與交易鎖]
     end
 
     subgraph domain[ProjectManagementWeb.Domain]
-        entities[Entities<br/>Project、TaskItem、Membership、Audit 等]
-        policyData[Constants 與 Enums<br/>Roles、Functions、Statuses]
+        entities[Entities／Project、TaskItem、Membership、Audit 等]
+        policyData[Constants 與 Enums／Roles、Functions、Statuses]
     end
 
     spa -->|HTTPS JSON、Bearer JWT、CSRF Header| controllers
@@ -55,6 +56,7 @@ flowchart LR
     services --> email
     services --> dbContext
     services --> codeGenerator
+    reminderJobs --> services
     codeGenerator --> dbContext
     support --> currentUser
     support --> dbContext
@@ -77,6 +79,7 @@ flowchart LR
 | Controllers | 接收 HTTP request、套用 `[Authorize]`／Function policy、呼叫 Application interface、轉換 HTTP status | 直接操作 `DbContext` |
 | Application contracts | 定義 API DTO、service interface、分頁與統一服務結果 | EF Core、SMTP 或 HTTP 實作 |
 | Infrastructure services | 實作帳號、偏好、專案、Task、留言等 use case 與 transaction boundary | HTTP response 格式 |
+| `ReminderJobs`／`ReminderService` | 每分鐘觸發 Scanner／Sender；依 Project 當地 08:00、七日視窗、SQL 原子 claim 與 5／15／60 分鐘 retry 執行提醒 | 在 Log 寫入 Email、Token、密碼或郵件本文 |
 | `ServiceSupport` | 計算全域 Function 與專案成員／ProjectManager 的資源權限 | 驗證密碼與簽發 token |
 | Identity／Token | 帳號驗證、唯一系統角色、JWT 簽發與 token-version、Refresh Token rotation | 專案角色授權 |
 | `ApplicationDbContext` | EF Core mapping、關聯、索引、query filter 與 seed data | 執行 HTTP 層驗證 |
@@ -143,15 +146,16 @@ Infrastructure -> Application / Domain
 - Controller 不直接依賴 EF Core；具體 service 經 DI 以 Application interface 注入。
 - SQL Server schema 只由已提交的 EF Core migrations 演進，不使用 `EnsureCreated`。
 - `Project`、`TaskItem`、`TaskItemComment` 使用 `rowversion` 進行 optimistic concurrency control。
-- Project、Task 與 Comment model 皆以 `DeletedAt` 搭配 EF query filter；目前公開刪除 API 只涵蓋 Task 與 Comment，Project 尚未提供刪除 endpoint。稽核、歷史與既有留言資料不隨 Task 軟刪除而消失。
+- Project、Task 與 Comment model 皆以 `DeletedAt` 搭配 EF query filter。Project DELETE 僅允許 `Administrator`／`Admin` 並記錄 `DeletedByAccountId`；Task 與 Comment 亦採軟刪除。成員、Task、留言、歷史與稽核資料均不因這些軟刪除而實體消失。
+- Task 到期提醒由 Hangfire 每分鐘喚醒 Scanner／Sender；Scanner 只有在 Project 當地 08:00 後且當地日期尚未執行時建立提醒，Sender 以 SQL 原子 claim 處理寄送、重查、取消、重試與最終 Failed／AlertedAt。
 
 ## 部署元件與啟動順序
 
 ```mermaid
 flowchart LR
     sqlContainer[SQL Server Container]
-    init[database-init<br/>建立最低權限登入]
-    migration[migration runner<br/>dotnet ef database update]
+    init[database-init／建立最低權限登入]
+    migration[migration runner／EF migrations + Hangfire schema initialization]
     apiContainer[API Container]
     volume[(SQL Data Volume)]
     keys[(Data Protection Keys Volume)]
@@ -164,4 +168,4 @@ flowchart LR
     apiContainer --> sqlContainer
 ```
 
-Compose 將 migration 與 API 分離，migration 帳號擁有 schema 變更權限，API 帳號只保留執行期所需的資料存取權限。Apple Silicon 本機環境以 `linux/amd64` 模擬執行 SQL Server 2022 image，此組合不應被視為正式生產環境的支援基準。
+Compose 將 migration 與 API 分離，migration 帳號先套用 EF migrations，再以 API 的 `--initialize-hangfire` 模式建立 Hangfire SQL schema；API runtime 設定 `PrepareSchemaIfNecessary=false`，帳號只保留執行期所需的資料存取權限。Apple Silicon 本機環境以 `linux/amd64` 模擬執行 SQL Server 2022 image，此組合不應被視為正式生產環境的支援基準。

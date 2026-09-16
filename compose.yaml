@@ -7,7 +7,7 @@ services:
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?請設定 MSSQL_SA_PASSWORD}
     ports:
-      - "1433:1433"
+      - "${MSSQL_HOST_PORT:-1433}:1433"
     volumes:
       - sqlserver-data:/var/opt/mssql
     healthcheck:
@@ -47,7 +47,9 @@ services:
         condition: service_completed_successfully
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      PMW_MIGRATION_DEFAULT_TIME_ZONE_ID: ${PMW_MIGRATION_DEFAULT_TIME_ZONE_ID:?請設定既有 Project 回填用的 IANA timezone ID}
       ConnectionStrings__DefaultConnection: Server=sqlserver,1433;Database=ProjectManagementWeb;User Id=pmw_migrator;Password=${MSSQL_MIGRATOR_PASSWORD:?請設定 MSSQL_MIGRATOR_PASSWORD};Encrypt=True;TrustServerCertificate=True
+      Hangfire__PrepareSchemaIfNecessary: "true"
     restart: "no"
 
   api:
@@ -72,7 +74,7 @@ services:
       BootstrapAdmin__Email: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BootstrapAdmin__Password: ${BOOTSTRAP_ADMIN_PASSWORD:-}
     ports:
-      - "8080:8080"
+      - "${API_HOST_PORT:-8080}:8080"
     volumes:
       - data-protection-keys:/app/keys
 

@@ -72,7 +72,7 @@ public sealed class AuthController : ApiControllerBase
     {
         if (!result.IsSuccess)
         {
-            return Task.FromResult<ActionResult<object>>(FromResult(result));
+            return Task.FromResult<ActionResult<object>>(FromError(result.Error!));
         }
         AuthTokenResult token = result.Value!;
         Response.Cookies.Append(RefreshCookieName, token.RefreshToken, RefreshCookieOptions(token.RefreshTokenExpiresAt));
@@ -94,8 +94,15 @@ public sealed class AuthController : ApiControllerBase
 
     private ActionResult<object> UnauthorizedProblem(string code, string title)
     {
-        var details = new ProblemDetails { Status = 401, Title = title, Instance = Request.Path };
+        var details = new ProblemDetails
+        {
+            Status = 401,
+            Title = title,
+            Type = "https://httpstatuses.com/401",
+            Instance = Request.Path
+        };
         details.Extensions["code"] = code;
+        details.Extensions["traceId"] = HttpContext.TraceIdentifier;
         return new ObjectResult(details) { StatusCode = 401 };
     }
 }

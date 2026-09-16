@@ -1,3 +1,5 @@
+using Hangfire;
+using Hangfire.SqlServer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -9,11 +11,13 @@ using ProjectManagementWeb.Application.Comments;
 using ProjectManagementWeb.Application.Common;
 using ProjectManagementWeb.Application.Preferences;
 using ProjectManagementWeb.Application.Projects;
+using ProjectManagementWeb.Application.Reminders;
 using ProjectManagementWeb.Application.Tasks;
 using ProjectManagementWeb.Application.Users;
 using ProjectManagementWeb.Infrastructure.Configuration;
 using ProjectManagementWeb.Infrastructure.Email;
 using ProjectManagementWeb.Infrastructure.Identity;
+using ProjectManagementWeb.Infrastructure.Jobs;
 using ProjectManagementWeb.Infrastructure.Persistence;
 using ProjectManagementWeb.Infrastructure.Security;
 using ProjectManagementWeb.Infrastructure.Services;
@@ -29,7 +33,7 @@ public static class DependencyInjection
 
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.Configure<SmtpOptions>(configuration.GetSection(SmtpOptions.SectionName));
-        services.AddDbContext<ApplicationDbContext>(options => options.UseSqlServer(connectionString));
+        services.AddDbContextFactory<ApplicationDbContext>(options => options.UseSqlServer(connectionString));
         services.AddIdentityCore<ApplicationUser>(options =>
             {
                 options.User.RequireUniqueEmail = true;
@@ -63,6 +67,25 @@ public static class DependencyInjection
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<ITaskService, TaskService>();
         services.AddScoped<ICommentService, CommentService>();
+        services.AddScoped<IReminderService, ReminderService>();
+        services.AddScoped<ReminderJobs>();
+        if (configuration.GetValue("ReminderJobs:Enabled", true))
+        {
+            services.AddHangfire(options => options
+                .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+                .UseSimpleAssemblyNameTypeSerializer()
+                .UseRecommendedSerializerSettings()
+                .UseSqlServerStorage(connectionString, new SqlServerStorageOptions
+                {
+                    PrepareSchemaIfNecessary = configuration.GetValue(
+                        "Hangfire:PrepareSchemaIfNecessary",
+                        false),
+                    QueuePollInterval = TimeSpan.FromSeconds(15),
+                    UseRecommendedIsolationLevel = true,
+                    DisableGlobalLocks = true
+                }));
+            services.AddHangfireServer(options => options.WorkerCount = 2);
+        }
         return services;
     }
 }

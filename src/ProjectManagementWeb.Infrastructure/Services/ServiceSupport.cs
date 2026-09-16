@@ -22,6 +22,9 @@ internal sealed class ServiceSupport
     public bool HasFunction(string code) => _currentUser.HasFunction(code);
     public bool IsViewer => string.Equals(_currentUser.Role, SystemRoles.Viewer, StringComparison.Ordinal);
 
+    public Task<bool> ProjectExistsAsync(Guid projectId, CancellationToken cancellationToken) =>
+        _db.Projects.AnyAsync(x => x.Id == projectId, cancellationToken);
+
     public Task<bool> CanReadProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
         HasFunction(SystemFunctions.ProjectsManageAll)
             ? Task.FromResult(true)

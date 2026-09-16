@@ -1,6 +1,6 @@
 # E-R Diagram
 
-本文件依目前 EF Core model 與 migrations 繪製。為維持可讀性，將 21 張資料表拆成 Identity／RBAC、專案／Task、系統紀錄三張圖。完整欄位定義請參閱 [TableSchema.md](TableSchema.md)。
+本文件依目前 EF Core model 與 migrations 繪製。為維持可讀性，將 26 張應用資料表拆成 Identity／RBAC、專案／Task、系統紀錄三張圖；Hangfire 自有 SQL schema 不展開。完整欄位定義請參閱 [TableSchema.md](TableSchema.md)。
 
 ## Identity 與 RBAC
 
@@ -90,6 +90,8 @@ erDiagram
         uniqueidentifier OwnerAccountId FK
         nvarchar Status
         int VersionNumber
+        nvarchar TimeZoneId
+        uniqueidentifier DeletedByAccountId FK
         rowversion RowVersion
         datetimeoffset DeletedAt
     }
@@ -133,6 +135,22 @@ erDiagram
         nvarchar Action
         nvarchar Snapshot
     }
+    PROJECT_REMINDER_RUNS {
+        uniqueidentifier Id PK
+        uniqueidentifier ProjectId FK
+        date ReminderDate UK
+        datetimeoffset StartedAt
+        datetimeoffset CompletedAt
+    }
+    TASK_REMINDERS {
+        uniqueidentifier Id PK
+        uniqueidentifier ProjectId FK
+        uniqueidentifier TaskItemId FK,UK
+        uniqueidentifier RecipientAccountId FK,UK
+        date ReminderDate UK
+        nvarchar Status
+        datetimeoffset NextAttemptAt
+    }
 
     ACCOUNTS ||--o{ PROJECTS : owns
     PROJECTS ||--o{ PROJECT_MEMBERS : contains
@@ -146,6 +164,10 @@ erDiagram
     ACCOUNTS ||--o{ TASK_ITEM_COMMENTS : writes
     TASK_ITEMS ||--o{ TASK_ITEM_HISTORIES : records
     ACCOUNTS ||--o{ TASK_ITEM_HISTORIES : performs
+    PROJECTS ||--o{ PROJECT_REMINDER_RUNS : scans
+    PROJECTS ||--o{ TASK_REMINDERS : owns
+    TASK_ITEMS ||--o{ TASK_REMINDERS : triggers
+    ACCOUNTS ||--o{ TASK_REMINDERS : receives
 ```
 
 `PROJECT_MEMBERS` 的 `(ProjectId, AccountId)` 複合 PK 保證一個帳號在同一專案只有一筆 membership；`PROJECT_MEMBER_ROLES` 的三欄複合 PK 允許該 membership 擁有多個不同 Project Role。
@@ -188,13 +210,13 @@ erDiagram
 - `AuditLogs.ActorAccountId` 可為 null，以支援系統操作；FK 採 `NoAction`，避免刪除帳號時破壞稽核資料。
 - `EmailMessages` 目前是獨立寄送紀錄，只保存 Recipient，沒有對 `Accounts` 建立 FK。
 - `BusinessCodeCounters` 是無外鍵的 Project／Task UTC 每日計數器，複合主鍵為 `(CodeType, BusinessDate)`。
-- `RefreshTokens.ReplacedByTokenId` 是應用層維護的輪替指標，目前不是資料庫 FK，因此未畫成實體關聯。
+- `RefreshTokens.ReplacedByTokenId` 已是 Delete NoAction 的 self-FK；提醒另以 Project／當地日期與 Task／收件人／提醒日期兩組 UNIQUE 保證冪等。
 
 ## 刪除與生命週期
 
 | Aggregate | 行為 |
 |---|---|
 | Account | Identity 支援表、AccountRole、RefreshToken、Preference cascade；專案、Task、留言、歷史與稽核關聯會限制實體刪除 |
-| Project | Entity 與 query filter 已支援軟刪除，但目前沒有公開刪除 API；若實體刪除，ProjectMembers cascade，但 TaskItems Restrict |
+| Project | 公開 API 支援 Administrator／Admin 以 rowVersion 軟刪除並保存 DeletedByAccountId；不提供還原或實體刪除，子資料由 query scope 隱藏但保留 |
 | TaskItem | 應用層使用軟刪除；Comments 與 Histories 均 Restrict，不連帶刪除 |
 | TaskItemComment | 應用層使用軟刪除，保留資料供稽核 |

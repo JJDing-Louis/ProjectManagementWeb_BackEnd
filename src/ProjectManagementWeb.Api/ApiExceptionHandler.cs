@@ -19,6 +19,7 @@ internal sealed class ApiExceptionHandler : IExceptionHandler
             Type = "https://www.rfc-editor.org/rfc/rfc9110#section-15.6.1",
             Instance = context.Request.Path
         };
+        details.Extensions["code"] = "internal_server_error";
         details.Extensions["traceId"] = context.TraceIdentifier;
         context.Response.StatusCode = details.Status.Value;
         await context.Response.WriteAsJsonAsync(details, cancellationToken);

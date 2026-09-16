@@ -114,7 +114,7 @@ dotnet ef migrations add MigrationName --project src/ProjectManagementWeb.Infras
 
 禁止使用 `EnsureCreated`。Project、Task、可修改留言使用 SQL Server `rowversion`，API 以 Base64 傳遞；版本衝突回傳 HTTP 409。
 
-目前 migration 共有 21 張資料表。Project／Task 業務編號由後端依 UTC 日期自動產生，格式分別為 `PRJ-YYYYMMDD######` 與 `TASK-YYYYMMDD######`，兩類型每日各自從 `000001` 起算。值得注意的是，Identity 執行期要求 Email 唯一，但現行 migration 尚未對 `Accounts.NormalizedEmail` 建立 UNIQUE constraint；若要從資料庫層完整保證，需另建 migration。詳細限制請參閱 [TableSchema.md](docs/TableSchema.md)。
+目前應用 migration 共有 26 張資料表，另由 migrator 初始化 Hangfire SQL schema。Project／Task 業務編號由後端依 UTC 日期自動產生，格式分別為 `PRJ-YYYYMMDD######` 與 `TASK-YYYYMMDD######`，兩類型每日各自從 `000001` 起算。`Accounts.NormalizedEmail` 已採 NOT NULL／UNIQUE，Refresh Token rotation 已有 self-FK，Task 到期提醒則以 Project 當地日期與 Task／收件人唯一鍵保證冪等。詳細限制請參閱 [TableSchema.md](docs/TableSchema.md)。
 
 ## 驗證
 
@@ -130,4 +130,4 @@ IntegrationTests 的輕量 API surface 測試使用 `WebApplicationFactory`。�
 
 ## 本階段不包含
 
-Hangfire 到期提醒、RoleFunction 動態管理、雲端部署與密碼重設不在本 MVP 範圍。Vue 3 前端已透過 `/api/v1` 正式串接本 API。
+RoleFunction 動態管理、雲端部署與密碼重設不在本 MVP 範圍。Hangfire 到期提醒已完成；最終寄送失敗會保存 DB Failed／AlertedAt 與不含敏感資料的結構化 Warning Log，本期不提供管理 UI。Vue 3 前端已透過 `/api/v1` 正式串接本 API。

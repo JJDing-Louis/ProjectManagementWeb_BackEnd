@@ -34,6 +34,14 @@ public sealed class ProjectsController : ApiControllerBase
     public async Task<ActionResult<ProjectResponse>> UpdateProject(Guid id, UpdateProjectRequest request, CancellationToken cancellationToken) =>
         FromResult(await _projects.UpdateProjectAsync(id, request, cancellationToken));
 
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> DeleteProject(Guid id, [FromQuery] string rowVersion,
+        CancellationToken cancellationToken)
+    {
+        var result = await _projects.DeleteProjectAsync(id, rowVersion, cancellationToken);
+        return result.IsSuccess ? NoContent() : FromResult(result).Result!;
+    }
+
     [HttpGet("roles")]
     public async Task<ActionResult<IReadOnlyCollection<ProjectRoleResponse>>> GetProjectRoles(CancellationToken cancellationToken) =>
         Ok(await _projects.GetProjectRolesAsync(cancellationToken));

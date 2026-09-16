@@ -82,23 +82,35 @@ internal sealed class ProjectService : IProjectService
         {
             return ServiceResult<ProjectResponse>.Failure("forbidden", "沒有建立專案的權限。", 403);
         }
-        if (string.IsNullOrWhiteSpace(request.Name))
+        ServiceError? validationError = ValidateProject(request.Name, request.Description, request.TimeZoneId);
+        if (validationError is not null)
         {
-            return ServiceResult<ProjectResponse>.Failure("validation_error", "專案名稱為必填。", 400);
+            return ServiceResult<ProjectResponse>.Failure(
+                validationError.Code,
+                validationError.Message,
+                validationError.StatusCode,
+                validationError.FieldErrors);
         }
-        ApplicationUser? owner = await _db.Users.SingleOrDefaultAsync(x => x.Id == request.OwnerAccountId && x.IsEnabled, cancellationToken);
-        if (owner is null)
+        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        if (!await IsEligibleOwnerAsync(request.OwnerAccountId, cancellationToken))
         {
-            return ServiceResult<ProjectResponse>.Failure("invalid_owner", "Owner 必須是有效帳號。", 422);
+            return ServiceResult<ProjectResponse>.Failure(
+                "invalid_owner", "Owner 必須是已啟用、Email 已驗證的 Administrator。", 422);
         }
         DateTimeOffset now = _timeProvider.GetUtcNow();
-        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         string? code = await _codeGenerator.GenerateAsync(BusinessCodeType.Project, now, cancellationToken);
         if (code is null)
         {
             return ServiceResult<ProjectResponse>.Failure("daily_code_limit_exceeded", "今日 Project 編號已達上限。", 409);
         }
-        var project = new Project(Guid.NewGuid(), code, request.Name.Trim(), request.Description?.Trim(), request.OwnerAccountId, now);
+        var project = new Project(
+            Guid.NewGuid(),
+            code,
+            request.Name.Trim(),
+            request.Description?.Trim(),
+            request.OwnerAccountId,
+            request.TimeZoneId!.Trim(),
+            now);
         _db.Projects.Add(project);
         _db.ProjectMembers.Add(new ProjectMember(project.Id, request.OwnerAccountId, now));
         _db.ProjectMemberRoles.Add(new ProjectMemberRole(project.Id, request.OwnerAccountId,
@@ -122,6 +134,15 @@ internal sealed class ProjectService : IProjectService
         {
             return ServiceResult<ProjectResponse>.Failure("forbidden", "沒有修改此專案的權限。", 403);
         }
+        ServiceError? validationError = ValidateProject(request.Name, request.Description, request.TimeZoneId);
+        if (validationError is not null)
+        {
+            return ServiceResult<ProjectResponse>.Failure(
+                validationError.Code,
+                validationError.Message,
+                validationError.StatusCode,
+                validationError.FieldErrors);
+        }
         await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         Project? project = await _db.Projects.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (project is null)
@@ -131,6 +152,11 @@ internal sealed class ProjectService : IProjectService
         if (!ServiceSupport.TryDecodeRowVersion(request.RowVersion, out byte[] version) || !project.RowVersion.SequenceEqual(version))
         {
             return ServiceResult<ProjectResponse>.Failure("concurrency_conflict", "專案已被其他使用者更新，請重新載入。", 409);
+        }
+        if (!await IsEligibleOwnerAsync(request.OwnerAccountId, cancellationToken))
+        {
+            return ServiceResult<ProjectResponse>.Failure(
+                "invalid_owner", "Owner 必須是已啟用、Email 已驗證的 Administrator。", 422);
         }
         bool ownerIsMember = await _db.ProjectMembers.AnyAsync(x => x.ProjectId == id && x.AccountId == request.OwnerAccountId, cancellationToken);
         if (!ownerIsMember)
@@ -144,10 +170,16 @@ internal sealed class ProjectService : IProjectService
         {
             _db.ProjectMemberRoles.Add(new ProjectMemberRole(id, request.OwnerAccountId, managerRoleId));
         }
-        var before = new { project.Name, project.Description, project.OwnerAccountId, project.Status, project.VersionNumber };
-        project.Update(request.Name.Trim(), request.Description?.Trim(), request.OwnerAccountId, request.Status, _timeProvider.GetUtcNow());
+        var before = new { project.Name, project.Description, project.OwnerAccountId, project.TimeZoneId, project.Status, project.VersionNumber };
+        project.Update(
+            request.Name.Trim(),
+            request.Description?.Trim(),
+            request.OwnerAccountId,
+            request.TimeZoneId!.Trim(),
+            request.Status,
+            _timeProvider.GetUtcNow());
         _support.AddAudit("Update", "Project", id.ToString(), before,
-            new { project.Name, project.Description, project.OwnerAccountId, project.Status, project.VersionNumber }, _timeProvider.GetUtcNow());
+            new { project.Name, project.Description, project.OwnerAccountId, project.TimeZoneId, project.Status, project.VersionNumber }, _timeProvider.GetUtcNow());
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
@@ -160,11 +192,66 @@ internal sealed class ProjectService : IProjectService
         return ServiceResult<ProjectResponse>.Success(Map(project));
     }
 
+    public async Task<ServiceResult<bool>> DeleteProjectAsync(
+        Guid id,
+        string rowVersion,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.AccountId is not Guid actorId ||
+            _currentUser.Role is not (SystemRoles.Administrator or SystemRoles.Admin))
+        {
+            return ServiceResult<bool>.Failure("forbidden", "沒有刪除專案的權限。", 403);
+        }
+
+        Project? project = await _db.Projects.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (project is null)
+        {
+            return ServiceResult<bool>.Failure("not_found", "找不到專案。", 404);
+        }
+        if (!ServiceSupport.TryDecodeRowVersion(rowVersion, out byte[] version) ||
+            !project.RowVersion.SequenceEqual(version))
+        {
+            return ServiceResult<bool>.Failure("concurrency_conflict", "專案已被其他使用者更新，請重新載入。", 409);
+        }
+
+        var before = new
+        {
+            project.Name,
+            project.OwnerAccountId,
+            project.Status,
+            project.DeletedAt,
+            project.DeletedByAccountId
+        };
+        DateTimeOffset now = _timeProvider.GetUtcNow();
+        project.SoftDelete(actorId, now);
+        _support.AddAudit("Delete", "Project", id.ToString(), before, new
+        {
+            project.Name,
+            project.OwnerAccountId,
+            project.Status,
+            project.DeletedAt,
+            project.DeletedByAccountId
+        }, now);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return ServiceResult<bool>.Failure("concurrency_conflict", "專案已被其他使用者更新，請重新載入。", 409);
+        }
+        return ServiceResult<bool>.Success(true);
+    }
+
     public async Task<ServiceResult<IReadOnlyCollection<ProjectMemberResponse>>> GetMembersAsync(Guid projectId, CancellationToken cancellationToken)
     {
         if (!await _support.CanReadProjectAsync(projectId, cancellationToken))
         {
             return ServiceResult<IReadOnlyCollection<ProjectMemberResponse>>.Failure("forbidden", "沒有讀取成員的權限。", 403);
+        }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<IReadOnlyCollection<ProjectMemberResponse>>.Failure("not_found", "找不到專案。", 404);
         }
         return ServiceResult<IReadOnlyCollection<ProjectMemberResponse>>.Success(await MapMembersAsync(projectId, null, cancellationToken));
     }
@@ -175,6 +262,10 @@ internal sealed class ProjectService : IProjectService
         if (!await _support.CanManageProjectAsync(projectId, cancellationToken))
         {
             return ServiceResult<PagedResult<MemberCandidateResponse>>.Failure("forbidden", "沒有管理成員的權限。", 403);
+        }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<PagedResult<MemberCandidateResponse>>.Failure("not_found", "找不到專案。", 404);
         }
 
         int page = Math.Max(query.Page, 1);
@@ -206,6 +297,10 @@ internal sealed class ProjectService : IProjectService
         if (!await _support.CanManageProjectAsync(projectId, cancellationToken))
         {
             return ServiceResult<ProjectMemberResponse>.Failure("forbidden", "沒有管理成員的權限。", 403);
+        }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<ProjectMemberResponse>.Failure("not_found", "找不到專案。", 404);
         }
         if (request.ProjectRoleIds.Count == 0 || !await RolesExistAsync(request.ProjectRoleIds, cancellationToken))
         {
@@ -240,6 +335,10 @@ internal sealed class ProjectService : IProjectService
         if (!await _support.CanManageProjectAsync(projectId, cancellationToken))
         {
             return ServiceResult<ProjectMemberResponse>.Failure("forbidden", "沒有管理成員的權限。", 403);
+        }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<ProjectMemberResponse>.Failure("not_found", "找不到專案。", 404);
         }
         if (request.ProjectRoleIds.Count == 0 || !await RolesExistAsync(request.ProjectRoleIds, cancellationToken))
         {
@@ -298,6 +397,38 @@ internal sealed class ProjectService : IProjectService
         return distinct.Length > 0 && await _db.ProjectRoles.CountAsync(x => distinct.Contains(x.Id), cancellationToken) == distinct.Length;
     }
 
+    private static ServiceError? ValidateProject(string name, string? description, string? timeZoneId)
+    {
+        var errors = new Dictionary<string, string[]>();
+        if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 200)
+        {
+            errors["name"] = ["專案名稱為必填且不得超過 200 字。"];
+        }
+        if (description?.Trim().Length > 4000)
+        {
+            errors["description"] = ["專案說明不得超過 4000 字。"];
+        }
+        string normalizedTimeZoneId = timeZoneId?.Trim() ?? string.Empty;
+        if (normalizedTimeZoneId.Length == 0 || normalizedTimeZoneId.Length > 100 ||
+            !TimeZoneInfo.TryConvertIanaIdToWindowsId(normalizedTimeZoneId, out _))
+        {
+            errors["timeZoneId"] = ["時區為必填且必須是有效的 IANA timezone ID。"];
+        }
+        return errors.Count == 0
+            ? null
+            : new ServiceError("validation_error", "Project 欄位驗證失敗。", 400, errors);
+    }
+
+    private async Task<bool> IsEligibleOwnerAsync(Guid accountId, CancellationToken cancellationToken) =>
+        await (from account in _db.Users
+               join accountRole in _db.UserRoles on account.Id equals accountRole.UserId
+               join role in _db.Roles on accountRole.RoleId equals role.Id
+               where account.Id == accountId &&
+                     account.IsEnabled &&
+                     account.EmailConfirmed &&
+                     role.Name == SystemRoles.Administrator
+               select account.Id).AnyAsync(cancellationToken);
+
     private async Task<IReadOnlyCollection<ProjectMemberResponse>> MapMembersAsync(Guid projectId, Guid? accountId, CancellationToken cancellationToken)
     {
         IQueryable<ProjectMember> members = _db.ProjectMembers.AsNoTracking().Where(x => x.ProjectId == projectId);
@@ -322,6 +453,6 @@ internal sealed class ProjectService : IProjectService
     }
 
     private static ProjectResponse Map(Project project) => new(project.Id, project.Code, project.Name, project.Description,
-        project.OwnerAccountId, project.Status, project.CreatedAt, project.UpdatedAt, project.VersionNumber,
+        project.OwnerAccountId, project.TimeZoneId, project.Status, project.CreatedAt, project.UpdatedAt, project.VersionNumber,
         Convert.ToBase64String(project.RowVersion));
 }

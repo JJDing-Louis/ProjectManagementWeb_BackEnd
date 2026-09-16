@@ -25,9 +25,15 @@ internal sealed class CommentService : ICommentService
     public async Task<ServiceResult<IReadOnlyCollection<CommentResponse>>> GetCommentsAsync(
         Guid projectId, Guid taskId, CancellationToken cancellationToken)
     {
-        if (!_currentUser.HasFunction(SystemFunctions.CommentsRead) || !await TaskAccessibleAsync(projectId, taskId, cancellationToken))
+        if (!_currentUser.HasFunction(SystemFunctions.CommentsRead))
         {
             return ServiceResult<IReadOnlyCollection<CommentResponse>>.Failure("forbidden", "沒有讀取留言的權限。", 403);
+        }
+        ServiceError? accessError = await GetTaskAccessErrorAsync(projectId, taskId, cancellationToken);
+        if (accessError is not null)
+        {
+            return ServiceResult<IReadOnlyCollection<CommentResponse>>.Failure(
+                accessError.Code, accessError.Message, accessError.StatusCode);
         }
         TaskItemComment[] rows = await _db.TaskItemComments.AsNoTracking()
             .Where(x => x.TaskItemId == taskId).OrderBy(x => x.CreatedAt).ToArrayAsync(cancellationToken);
@@ -38,10 +44,14 @@ internal sealed class CommentService : ICommentService
     public async Task<ServiceResult<CommentResponse>> CreateCommentAsync(
         Guid projectId, Guid taskId, CreateCommentRequest request, CancellationToken cancellationToken)
     {
-        if (!_currentUser.HasFunction(SystemFunctions.CommentsCreate) || _currentUser.AccountId is not Guid authorId ||
-            !await TaskAccessibleAsync(projectId, taskId, cancellationToken))
+        if (!_currentUser.HasFunction(SystemFunctions.CommentsCreate) || _currentUser.AccountId is not Guid authorId)
         {
             return ServiceResult<CommentResponse>.Failure("forbidden", "沒有新增留言的權限。", 403);
+        }
+        ServiceError? accessError = await GetTaskAccessErrorAsync(projectId, taskId, cancellationToken);
+        if (accessError is not null)
+        {
+            return ServiceResult<CommentResponse>.Failure(accessError.Code, accessError.Message, accessError.StatusCode);
         }
         ServiceError? validation = ValidateContent(request.Content);
         if (validation is not null)
@@ -58,10 +68,14 @@ internal sealed class CommentService : ICommentService
     public async Task<ServiceResult<CommentResponse>> UpdateCommentAsync(
         Guid projectId, Guid taskId, Guid commentId, UpdateCommentRequest request, CancellationToken cancellationToken)
     {
-        if (!_currentUser.HasFunction(SystemFunctions.CommentsUpdateOwn) || _currentUser.AccountId is not Guid authorId ||
-            !await TaskAccessibleAsync(projectId, taskId, cancellationToken))
+        if (!_currentUser.HasFunction(SystemFunctions.CommentsUpdateOwn) || _currentUser.AccountId is not Guid authorId)
         {
             return ServiceResult<CommentResponse>.Failure("forbidden", "沒有修改留言的權限。", 403);
+        }
+        ServiceError? accessError = await GetTaskAccessErrorAsync(projectId, taskId, cancellationToken);
+        if (accessError is not null)
+        {
+            return ServiceResult<CommentResponse>.Failure(accessError.Code, accessError.Message, accessError.StatusCode);
         }
         TaskItemComment? comment = await _db.TaskItemComments.SingleOrDefaultAsync(x => x.Id == commentId && x.TaskItemId == taskId, cancellationToken);
         if (comment is null)
@@ -98,10 +112,14 @@ internal sealed class CommentService : ICommentService
     public async Task<ServiceResult<bool>> DeleteCommentAsync(
         Guid projectId, Guid taskId, Guid commentId, string rowVersion, CancellationToken cancellationToken)
     {
-        if (!_currentUser.HasFunction(SystemFunctions.CommentsDeleteOwn) || _currentUser.AccountId is not Guid authorId ||
-            !await TaskAccessibleAsync(projectId, taskId, cancellationToken))
+        if (!_currentUser.HasFunction(SystemFunctions.CommentsDeleteOwn) || _currentUser.AccountId is not Guid authorId)
         {
             return ServiceResult<bool>.Failure("forbidden", "沒有刪除留言的權限。", 403);
+        }
+        ServiceError? accessError = await GetTaskAccessErrorAsync(projectId, taskId, cancellationToken);
+        if (accessError is not null)
+        {
+            return ServiceResult<bool>.Failure(accessError.Code, accessError.Message, accessError.StatusCode);
         }
         TaskItemComment? comment = await _db.TaskItemComments.SingleOrDefaultAsync(x => x.Id == commentId && x.TaskItemId == taskId, cancellationToken);
         if (comment is null)
@@ -129,9 +147,21 @@ internal sealed class CommentService : ICommentService
         return ServiceResult<bool>.Success(true);
     }
 
-    private async Task<bool> TaskAccessibleAsync(Guid projectId, Guid taskId, CancellationToken cancellationToken) =>
-        await _support.CanReadProjectAsync(projectId, cancellationToken) &&
-        await _db.TaskItems.AnyAsync(x => x.ProjectId == projectId && x.Id == taskId, cancellationToken);
+    private async Task<ServiceError?> GetTaskAccessErrorAsync(
+        Guid projectId, Guid taskId, CancellationToken cancellationToken)
+    {
+        if (!await _support.CanReadProjectAsync(projectId, cancellationToken))
+        {
+            return new ServiceError("forbidden", "沒有讀取 Project 的權限。", 403);
+        }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return new ServiceError("not_found", "找不到 Project。", 404);
+        }
+        return await _db.TaskItems.AnyAsync(x => x.ProjectId == projectId && x.Id == taskId, cancellationToken)
+            ? null
+            : new ServiceError("not_found", "找不到 Task。", 404);
+    }
 
     private static ServiceError? ValidateContent(string content) =>
         string.IsNullOrWhiteSpace(content) || content.Trim().Length > 2000

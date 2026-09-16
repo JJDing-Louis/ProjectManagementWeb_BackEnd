@@ -185,48 +185,57 @@ internal sealed class UserService : IUserService
             return ServiceResult<UserResponse>.Failure("email_not_confirmed", "Email 尚未驗證，只能使用 Viewer。", 422);
         }
 
-        await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        IList<string> currentRoles = await _userManager.GetRolesAsync(user);
-        string currentRole = currentRoles.SingleOrDefault() ?? SystemRoles.Viewer;
-        bool removesEnabledAdmin = currentRole == SystemRoles.Admin && user.IsEnabled &&
-                                   (role.Name != SystemRoles.Admin || !request.IsEnabled);
-        if (removesEnabledAdmin && await CountAdminsAsync(cancellationToken) <= 1)
+        bool protectsLastAdmin = false;
+        try
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            IList<string> currentRoles = await _userManager.GetRolesAsync(user);
+            string currentRole = currentRoles.SingleOrDefault() ?? SystemRoles.Viewer;
+            bool removesEnabledAdmin = currentRole == SystemRoles.Admin && user.IsEnabled &&
+                                       (role.Name != SystemRoles.Admin || !request.IsEnabled);
+            protectsLastAdmin = removesEnabledAdmin;
+            if (removesEnabledAdmin && await CountAdminsAsync(cancellationToken) <= 1)
+            {
+                return ServiceResult<UserResponse>.Failure("last_admin", "不可停用或移除最後一位 Admin。", 409);
+            }
+
+            if (!string.Equals(currentRole, role.Name, StringComparison.Ordinal))
+            {
+                if (currentRoles.Count > 0)
+                {
+                    IdentityResult removed = await _userManager.RemoveFromRolesAsync(user, currentRoles);
+                    if (!removed.Succeeded)
+                    {
+                        return ServiceResult<UserResponse>.Failure("role_update_failed", "無法移除原角色。", 500);
+                    }
+                }
+                IdentityResult added = await _userManager.AddToRoleAsync(user, role.Name);
+                if (!added.Succeeded)
+                {
+                    return ServiceResult<UserResponse>.Failure("role_update_failed", "無法設定角色。", 500);
+                }
+            }
+
+            bool wasEnabled = user.IsEnabled;
+            user.IsEnabled = request.IsEnabled;
+            user.TokenVersion++;
+            IdentityResult updated = await _userManager.UpdateAsync(user);
+            if (!updated.Succeeded)
+            {
+                return ServiceResult<UserResponse>.Failure("account_update_failed", "無法更新帳號。", 500);
+            }
+            await RevokeTokensAsync(user.Id, cancellationToken);
+            _support.AddAudit("UpdateAdministration", "Account", user.Id.ToString(),
+                new { Role = currentRole, IsEnabled = wasEnabled },
+                new { Role = role.Name, request.IsEnabled }, _timeProvider.GetUtcNow());
+            await _db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return ServiceResult<UserResponse>.Success(await MapAsync(user));
+        }
+        catch (Exception exception) when (protectsLastAdmin && IsSqlServerDeadlock(exception))
         {
             return ServiceResult<UserResponse>.Failure("last_admin", "不可停用或移除最後一位 Admin。", 409);
         }
-
-        if (!string.Equals(currentRole, role.Name, StringComparison.Ordinal))
-        {
-            if (currentRoles.Count > 0)
-            {
-                IdentityResult removed = await _userManager.RemoveFromRolesAsync(user, currentRoles);
-                if (!removed.Succeeded)
-                {
-                    return ServiceResult<UserResponse>.Failure("role_update_failed", "無法移除原角色。", 500);
-                }
-            }
-            IdentityResult added = await _userManager.AddToRoleAsync(user, role.Name);
-            if (!added.Succeeded)
-            {
-                return ServiceResult<UserResponse>.Failure("role_update_failed", "無法設定角色。", 500);
-            }
-        }
-
-        bool wasEnabled = user.IsEnabled;
-        user.IsEnabled = request.IsEnabled;
-        user.TokenVersion++;
-        IdentityResult updated = await _userManager.UpdateAsync(user);
-        if (!updated.Succeeded)
-        {
-            return ServiceResult<UserResponse>.Failure("account_update_failed", "無法更新帳號。", 500);
-        }
-        await RevokeTokensAsync(user.Id, cancellationToken);
-        _support.AddAudit("UpdateAdministration", "Account", user.Id.ToString(),
-            new { Role = currentRole, IsEnabled = wasEnabled },
-            new { Role = role.Name, request.IsEnabled }, _timeProvider.GetUtcNow());
-        await _db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return ServiceResult<UserResponse>.Success(await MapAsync(user));
     }
 
     public async Task<IReadOnlyCollection<RoleResponse>> GetRolesAsync(CancellationToken cancellationToken)
@@ -252,6 +261,10 @@ internal sealed class UserService : IUserService
             user.Name, user.EmailConfirmed, user.IsEnabled, roles.SingleOrDefault() ?? SystemRoles.Viewer,
             _bootstrapAdmin.IsBootstrapAdmin(user.UserName));
     }
+
+    private static bool IsSqlServerDeadlock(Exception exception) =>
+        exception is Microsoft.Data.SqlClient.SqlException { Number: 1205 } ||
+        exception.InnerException is not null && IsSqlServerDeadlock(exception.InnerException);
 
     private static ServiceResult<UserResponse> BootstrapAdminImmutable() =>
         ServiceResult<UserResponse>.Failure("bootstrap_admin_immutable", "系統預設 Admin 不可修改。", 409);

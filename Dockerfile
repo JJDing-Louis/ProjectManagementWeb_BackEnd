@@ -15,7 +15,7 @@ RUN dotnet build ProjectManagementWeb.slnx -c Release --no-restore
 RUN dotnet publish src/ProjectManagementWeb.Api/ProjectManagementWeb.Api.csproj -c Release -o /app/publish --no-restore
 
 FROM build AS migrator
-ENTRYPOINT ["dotnet", "ef", "database", "update", "--project", "src/ProjectManagementWeb.Infrastructure", "--startup-project", "src/ProjectManagementWeb.Api", "--configuration", "Release", "--no-build"]
+ENTRYPOINT ["/bin/bash", "-c", "dotnet ef database update --project src/ProjectManagementWeb.Infrastructure --startup-project src/ProjectManagementWeb.Api --configuration Release --no-build && dotnet /app/publish/ProjectManagementWeb.Api.dll --initialize-hangfire"]
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app

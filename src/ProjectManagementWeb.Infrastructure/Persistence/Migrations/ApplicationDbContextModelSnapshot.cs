@@ -219,6 +219,86 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                     b.ToTable("EmailMessages", (string)null);
                 });
 
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.EmailVerificationResendAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ClientAddressHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientAddressHash", "RequestedAt");
+
+                    b.HasIndex("AccountId", "Outcome", "RequestedAt");
+
+                    b.ToTable("EmailVerificationResendAttempts", (string)null);
+                });
+
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.EmailVerificationToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("ActivatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("EmailMessageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("InvalidatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId")
+                        .IsUnique()
+                        .HasFilter("[ActivatedAt] IS NOT NULL AND [UsedAt] IS NULL AND [InvalidatedAt] IS NULL");
+
+                    b.HasIndex("EmailMessageId")
+                        .IsUnique();
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("EmailVerificationTokens", (string)null);
+                });
+
             modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.FunctionPermission", b =>
                 {
                     b.Property<Guid>("Id")
@@ -353,6 +433,39 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.LoginFailureAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountKeyHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ClientAddressHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountKeyHash", "Outcome", "OccurredAt");
+
+                    b.HasIndex("ClientAddressHash", "Outcome", "OccurredAt");
+
+                    b.ToTable("LoginFailureAttempts", (string)null);
+                });
+
             modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.Project", b =>
                 {
                     b.Property<Guid>("Id")
@@ -369,6 +482,9 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("DeletedByAccountId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Description")
                         .HasMaxLength(4000)
@@ -393,6 +509,11 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
 
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -406,6 +527,8 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                     b.HasIndex("Code")
                         .IsUnique()
                         .HasFilter("[DeletedAt] IS NULL");
+
+                    b.HasIndex("DeletedByAccountId");
 
                     b.HasIndex("OwnerAccountId", "Status");
 
@@ -446,6 +569,41 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProjectRoleId");
 
                     b.ToTable("ProjectMemberRoles", (string)null);
+                });
+
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.ProjectReminderRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CreatedCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("DuplicateCount")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("ReminderDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("SkippedCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "ReminderDate")
+                        .IsUnique();
+
+                    b.ToTable("ProjectReminderRuns", (string)null);
                 });
 
             modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.ProjectRole", b =>
@@ -534,6 +692,8 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(64)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ReplacedByTokenId");
 
                     b.HasIndex("TokenHash")
                         .IsUnique();
@@ -934,6 +1094,79 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                     b.ToTable("TaskItemHistories", (string)null);
                 });
 
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.TaskReminder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("AlertedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("ClaimedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProviderResponseId")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("RecipientAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateOnly>("ReminderDate")
+                        .HasColumnType("date");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid>("TaskItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("RecipientAccountId");
+
+                    b.HasIndex("Status", "NextAttemptAt");
+
+                    b.HasIndex("TaskItemId", "RecipientAccountId", "ReminderDate")
+                        .IsUnique();
+
+                    b.ToTable("TaskReminders", (string)null);
+                });
+
             modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.UserPreference", b =>
                 {
                     b.Property<Guid>("AccountId")
@@ -1046,6 +1279,7 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("NormalizedEmail")
+                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
@@ -1082,6 +1316,7 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("NormalizedEmail")
+                        .IsUnique()
                         .HasDatabaseName("EmailIndex");
 
                     b.HasIndex("NormalizedUserName")
@@ -1154,8 +1389,36 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.NoAction);
                 });
 
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.EmailVerificationResendAttempt", b =>
+                {
+                    b.HasOne("ProjectManagementWeb.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.EmailVerificationToken", b =>
+                {
+                    b.HasOne("ProjectManagementWeb.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("AccountId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ProjectManagementWeb.Domain.Entities.EmailMessage", null)
+                        .WithOne()
+                        .HasForeignKey("ProjectManagementWeb.Domain.Entities.EmailVerificationToken", "EmailMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.Project", b =>
                 {
+                    b.HasOne("ProjectManagementWeb.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("DeletedByAccountId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("ProjectManagementWeb.Infrastructure.Identity.ApplicationUser", null)
                         .WithMany()
                         .HasForeignKey("OwnerAccountId")
@@ -1193,6 +1456,15 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.ProjectReminderRun", b =>
+                {
+                    b.HasOne("ProjectManagementWeb.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.RefreshToken", b =>
                 {
                     b.HasOne("ProjectManagementWeb.Infrastructure.Identity.ApplicationUser", null)
@@ -1200,6 +1472,11 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                         .HasForeignKey("AccountId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ProjectManagementWeb.Domain.Entities.RefreshToken", null)
+                        .WithMany()
+                        .HasForeignKey("ReplacedByTokenId")
+                        .OnDelete(DeleteBehavior.NoAction);
                 });
 
             modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.RoleFunction", b =>
@@ -1265,6 +1542,27 @@ namespace ProjectManagementWeb.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("TaskItemId")
                         .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("ProjectManagementWeb.Domain.Entities.TaskReminder", b =>
+                {
+                    b.HasOne("ProjectManagementWeb.Domain.Entities.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("ProjectManagementWeb.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("RecipientAccountId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("ProjectManagementWeb.Domain.Entities.TaskItem", null)
+                        .WithMany()
+                        .HasForeignKey("TaskItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
                         .IsRequired();
                 });
 

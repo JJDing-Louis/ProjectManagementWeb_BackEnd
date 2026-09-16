@@ -1,6 +1,6 @@
 # 資料庫 Table Schema
 
-本文件依 `ApplicationDbContext` 與目前的 `InitialCreate` migration 整理。正式 schema 版本來源仍是 `src/ProjectManagementWeb.Infrastructure/Persistence/Migrations/`，本文件用於閱讀與前後端協作，不取代 migration。
+本文件依 `ApplicationDbContext`、全部現行 migrations 與 model snapshot 整理。正式 schema 版本來源仍是 `src/ProjectManagementWeb.Infrastructure/Persistence/Migrations/`，本文件用於閱讀與前後端協作，不取代 migration。
 
 ## 設計慣例
 
@@ -26,7 +26,7 @@ ASP.NET Core Identity 帳號資料。
 | `UserName` | `nvarchar(256)` | 是 |  | 登入帳號 |
 | `NormalizedUserName` | `nvarchar(256)` | 是 | UNIQUE filtered | 正規化登入帳號 |
 | `Email` | `nvarchar(256)` | 是 |  | Email |
-| `NormalizedEmail` | `nvarchar(256)` | 是 | INDEX | 正規化 Email |
+| `NormalizedEmail` | `nvarchar(256)` | 否 | UNIQUE | 正規化 Email；migration 遇 NULL／重複資料時 fail-fast |
 | `EmailConfirmed` | `bit` | 否 |  | Email 是否驗證 |
 | `PasswordHash` | `nvarchar(max)` | 是 |  | Identity 密碼雜湊 |
 | `SecurityStamp` | `nvarchar(max)` | 是 |  | Identity security stamp |
@@ -41,8 +41,6 @@ ASP.NET Core Identity 帳號資料。
 | `Remark` | `nvarchar(500)` | 是 |  | 備註 |
 | `IsEnabled` | `bit` | 否 |  | 帳號是否啟用 |
 | `TokenVersion` | `int` | 否 |  | JWT 失效版本 |
-
-> 現行 Identity 設定要求 runtime Email 唯一，但 migration 的 `EmailIndex` 並非 UNIQUE。若需要資料庫層也強制唯一，應新增 migration；在此之前仍存在繞過應用服務寫入重複 Email 的風險。
 
 ### Roles
 
@@ -91,7 +89,7 @@ ASP.NET Core Identity 帳號資料。
 | `ExpiresAt` | `datetimeoffset` | 否 |  | 到期時間 |
 | `CreatedAt` | `datetimeoffset` | 否 |  | 建立時間 |
 | `RevokedAt` | `datetimeoffset` | 是 |  | 撤銷時間 |
-| `ReplacedByTokenId` | `uniqueidentifier` | 是 | 邏輯參照 | 輪替後的新 token；目前沒有 FK constraint |
+| `ReplacedByTokenId` | `uniqueidentifier` | 是 | self-FK → `RefreshTokens.Id` | 輪替後的新 token；Delete NoAction |
 
 ### UserPreferences
 
@@ -122,11 +120,13 @@ ASP.NET Core Identity 帳號資料。
 | `Name` | `nvarchar(200)` | 否 |  | 專案名稱 |
 | `Description` | `nvarchar(4000)` | 是 |  | 說明 |
 | `OwnerAccountId` | `uniqueidentifier` | 否 | FK → `Accounts.Id`、INDEX with Status | Owner，刪除採 Restrict |
+| `TimeZoneId` | `nvarchar(100)` | 否 |  | Project 的合法 IANA timezone ID；新建時必填 |
 | `Status` | `nvarchar(30)` | 否 |  | `Pending`、`Active`、`Completed`、`Archived` |
 | `VersionNumber` | `int` | 否 | DEFAULT 1 | 使用者可讀的專案版本；每次更新專案基本資料時遞增 |
 | `CreatedAt` | `datetimeoffset` | 否 |  | 建立時間 |
 | `UpdatedAt` | `datetimeoffset` | 否 |  | 更新時間 |
 | `DeletedAt` | `datetimeoffset` | 是 | query filter | 軟刪除時間 |
+| `DeletedByAccountId` | `uniqueidentifier` | 是 | FK → `Accounts.Id` | 軟刪除操作者；Delete NoAction |
 | `RowVersion` | `rowversion` | 否 | concurrency token | API 以 Base64 傳輸 |
 
 ### ProjectMembers
@@ -245,6 +245,42 @@ Project 與 Task 的 UTC 每日業務編號計數器。產生編號與建立實�
 
 `EmailMessages` 目前以 Recipient 保存收件資訊，沒有對 `Accounts` 建立 Foreign Key。
 
+### EmailVerificationTokens、EmailVerificationResendAttempts、LoginFailureAttempts
+
+- `EmailVerificationTokens` 保存 AccountId、EmailMessageId、SHA-256 TokenHash、CreatedAt、ExpiresAt、ActivatedAt、UsedAt、InvalidatedAt；TokenHash UNIQUE，EmailMessageId 一對一 UNIQUE，同帳號同時最多一個有效 Token。
+- `EmailVerificationResendAttempts` 保存 nullable AccountId、SHA-256 ClientAddressHash、RequestedAt、Outcome；相關 index 支援帳號 60 秒冷卻與帳號／IP 滾動 60 分鐘上限，不保存 IP 原文。
+- `LoginFailureAttempts` 保存 SHA-256 AccountKeyHash、SHA-256 ClientAddressHash、OccurredAt、Outcome；相關 index 支援跨執行個體共用的 15 分鐘帳號／IP 失敗限制，不保存帳號或 IP 原文。
+
+### ProjectReminderRuns
+
+| 欄位 | 型別 | Null | Key／Constraint | 說明 |
+|---|---|---:|---|---|
+| `Id` | `uniqueidentifier` | 否 | PK | 掃描執行 ID |
+| `ProjectId` | `uniqueidentifier` | 否 | FK → `Projects.Id` | Project；Delete NoAction |
+| `ReminderDate` | `date` | 否 | UNIQUE with ProjectId | Project 當地提醒日期 |
+| `StartedAt`／`CompletedAt` | `datetimeoffset` | 後者是 |  | 執行起訖時間 |
+| `CreatedCount`／`DuplicateCount`／`SkippedCount` | `int` | 否 |  | 掃描摘要 |
+
+### TaskReminders
+
+| 欄位 | 型別 | Null | Key／Constraint | 說明 |
+|---|---|---:|---|---|
+| `Id` | `uniqueidentifier` | 否 | PK | 提醒 ID，同時作 provider idempotency key |
+| `ProjectId` | `uniqueidentifier` | 否 | FK → `Projects.Id` | Project；Delete NoAction |
+| `TaskItemId` | `uniqueidentifier` | 否 | FK → `TaskItems.Id`、UNIQUE composite | Task；Delete NoAction |
+| `RecipientAccountId` | `uniqueidentifier` | 否 | FK → `Accounts.Id`、UNIQUE composite | 收件人；Delete NoAction |
+| `ReminderDate` | `date` | 否 | UNIQUE composite | 與 TaskItemId、RecipientAccountId 組成唯一鍵 |
+| `Status` | `nvarchar(30)` | 否 | INDEX with NextAttemptAt | `Pending`、`Processing`、`Retry`、`Sent`、`Failed`、`Cancelled` |
+| `AttemptCount`／`RetryCount` | `int` | 否 |  | 初次與重試計數 |
+| `NextAttemptAt`／`CreatedAt` | `datetimeoffset` | 否 |  | 下一次可執行時間與建立時間 |
+| `ClaimedAt`／`ClaimToken` | `datetimeoffset`／`uniqueidentifier` | 是 |  | 5 分鐘原子 claim lease |
+| `SentAt`／`AlertedAt` | `datetimeoffset` | 是 |  | 成功與最終失敗告警時間 |
+| `ProviderResponseId` | `nvarchar(500)` | 是 |  | Provider 成功回應 ID |
+| `LastError` | `nvarchar(2000)` | 是 |  | 安全化失敗類型 |
+| `CancellationReason` | `nvarchar(200)` | 是 |  | 寄送前重查取消原因 |
+
+Hangfire SQL schema 由 migrator 權限帳號初始化；API runtime 設定 `PrepareSchemaIfNecessary=false`，只需既有資料的讀寫權，不取得 DDL 權限。
+
 ## 關鍵完整性與風險
 
 - `AccountRoles.UserId` UNIQUE：資料庫層保證每帳號最多一個系統角色。
@@ -252,6 +288,7 @@ Project 與 Task 的 UTC 每日業務編號計數器。產生編號與建立實�
 - `ProjectMemberRoles(ProjectId, AccountId, ProjectRoleId)` PK：同一 membership 可有多個專案角色。
 - Project／Task Code 由 `BusinessCodeCounters` 產生；既有 filtered unique index 仍只套用未軟刪除資料。產生器不會主動重用軟刪除 Code。
 - Task Code 現行唯一索引不包含 `ProjectId`，因此 Code 是全系統唯一，而非專案內唯一。
-- `RefreshTokens.ReplacedByTokenId` 沒有 FK；完整性由應用服務維護。
-- `Accounts.NormalizedEmail` 只有一般 index；runtime unique Email 與 DB constraint 尚未完全對齊。
+- `RefreshTokens.ReplacedByTokenId` self-FK 使用 NoAction，避免清理時連鎖刪除 token 歷史。
+- `Accounts.NormalizedEmail` 使用 NOT NULL／UNIQUE，並行重複註冊由資料庫保底。
+- `ProjectReminderRuns(ProjectId, ReminderDate)` 與 `TaskReminders(TaskItemId, RecipientAccountId, ReminderDate)` UNIQUE，搭配 SQL 原子 claim 防止多 scheduler／worker 重複處理。
 - 多數核心 FK 使用 Restrict／NoAction，以避免誤刪歷史資料；若日後加入實體刪除流程，必須先設計明確 transaction 與清理順序。

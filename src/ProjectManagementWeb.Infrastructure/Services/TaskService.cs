@@ -35,6 +35,10 @@ internal sealed class TaskService : ITaskService
         {
             return ServiceResult<PagedResult<TaskResponse>>.Failure("forbidden", "沒有讀取 Task 的權限。", 403);
         }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<PagedResult<TaskResponse>>.Failure("not_found", "找不到 Project。", 404);
+        }
         int page = Math.Max(query.Page, 1);
         int pageSize = Math.Clamp(query.PageSize, 1, 100);
         IQueryable<TaskItem> tasks = _db.TaskItems.AsNoTracking().Where(x => x.ProjectId == projectId);
@@ -69,6 +73,10 @@ internal sealed class TaskService : ITaskService
         {
             return ServiceResult<TaskResponse>.Failure("forbidden", "沒有讀取 Task 的權限。", 403);
         }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<TaskResponse>.Failure("not_found", "找不到 Project。", 404);
+        }
         TaskItem? task = await _db.TaskItems.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == projectId && x.Id == taskId, cancellationToken);
         return task is null
             ? ServiceResult<TaskResponse>.Failure("not_found", "找不到 Task。", 404)
@@ -82,7 +90,12 @@ internal sealed class TaskService : ITaskService
         {
             return ServiceResult<TaskResponse>.Failure("forbidden", "沒有建立 Task 的權限。", 403);
         }
-        ServiceError? validation = await ValidateTaskAsync(projectId, request.Title, request.AssignedAccountId, request.StartAt, request.Deadline, cancellationToken);
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<TaskResponse>.Failure("not_found", "找不到 Project。", 404);
+        }
+        ServiceError? validation = await ValidateTaskAsync(projectId, request.Title, request.Description,
+            request.AssignedAccountId, request.StartAt, request.Deadline, cancellationToken);
         if (validation is not null)
         {
             return ServiceResult<TaskResponse>.Failure(validation.Code, validation.Message, validation.StatusCode);
@@ -118,6 +131,10 @@ internal sealed class TaskService : ITaskService
         {
             return ServiceResult<TaskResponse>.Failure("forbidden", "沒有修改完整 Task 的權限。", 403);
         }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<TaskResponse>.Failure("not_found", "找不到 Project。", 404);
+        }
         TaskItem? task = await _db.TaskItems.SingleOrDefaultAsync(x => x.ProjectId == projectId && x.Id == taskId, cancellationToken);
         if (task is null)
         {
@@ -128,7 +145,8 @@ internal sealed class TaskService : ITaskService
         {
             return ServiceResult<TaskResponse>.Failure(versionError.Code, versionError.Message, versionError.StatusCode);
         }
-        ServiceError? validation = await ValidateTaskAsync(projectId, request.Title, request.AssignedAccountId, request.StartAt, request.Deadline, cancellationToken);
+        ServiceError? validation = await ValidateTaskAsync(projectId, request.Title, request.Description,
+            request.AssignedAccountId, request.StartAt, request.Deadline, cancellationToken);
         if (validation is not null)
         {
             return ServiceResult<TaskResponse>.Failure(validation.Code, validation.Message, validation.StatusCode);
@@ -149,6 +167,10 @@ internal sealed class TaskService : ITaskService
             !await _support.CanReadProjectAsync(projectId, cancellationToken))
         {
             return ServiceResult<TaskResponse>.Failure("forbidden", "沒有修改被指派 Task 的權限。", 403);
+        }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<TaskResponse>.Failure("not_found", "找不到 Project。", 404);
         }
         TaskItem? task = await _db.TaskItems.SingleOrDefaultAsync(x => x.ProjectId == projectId && x.Id == taskId, cancellationToken);
         if (task is null)
@@ -179,10 +201,22 @@ internal sealed class TaskService : ITaskService
     public async Task<ServiceResult<BatchUpdateResponse>> BatchUpdateStatusAsync(Guid projectId,
         BatchUpdateTaskStatusRequest request, CancellationToken cancellationToken)
     {
-        if (_currentUser.AccountId is not Guid actorId || request.Tasks.Count == 0 ||
-            !await _support.CanReadProjectAsync(projectId, cancellationToken))
+        if (_currentUser.AccountId is not Guid actorId)
         {
-            return ServiceResult<BatchUpdateResponse>.Failure("validation_error", "請至少選擇一筆可修改的 Task。", 400);
+            return ServiceResult<BatchUpdateResponse>.Failure("forbidden", "沒有讀取 Project 的權限。", 403);
+        }
+        if (!await _support.CanReadProjectAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<BatchUpdateResponse>.Failure("forbidden", "沒有讀取 Project 的權限。", 403);
+        }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<BatchUpdateResponse>.Failure("not_found", "找不到 Project。", 404);
+        }
+        if (request.Tasks.Count is 0 or > 10)
+        {
+            return ServiceResult<BatchUpdateResponse>.Failure(
+                "validation_error", "單次批次更新必須包含 1 至 10 筆 Task。", 400);
         }
         Guid[] ids = request.Tasks.Select(x => x.TaskId).Distinct().ToArray();
         if (ids.Length != request.Tasks.Count)
@@ -190,10 +224,6 @@ internal sealed class TaskService : ITaskService
             return ServiceResult<BatchUpdateResponse>.Failure("duplicate_task", "批次資料包含重複 Task。", 400);
         }
         List<TaskItem> tasks = await _db.TaskItems.Where(x => x.ProjectId == projectId && ids.Contains(x.Id)).ToListAsync(cancellationToken);
-        if (tasks.Count != ids.Length)
-        {
-            return ServiceResult<BatchUpdateResponse>.Failure("not_found", "批次資料包含不存在的 Task。", 404);
-        }
         bool canUpdateAny = _currentUser.HasFunction(SystemFunctions.TasksUpdateAny);
         bool canUpdateAssigned = _currentUser.HasFunction(SystemFunctions.TasksUpdateAssigned);
         foreach (TaskItem task in tasks)
@@ -202,6 +232,13 @@ internal sealed class TaskService : ITaskService
             {
                 return ServiceResult<BatchUpdateResponse>.Failure("forbidden", "批次資料包含無權修改的 Task。", 403);
             }
+        }
+        if (tasks.Count != ids.Length)
+        {
+            return ServiceResult<BatchUpdateResponse>.Failure("not_found", "批次資料包含不存在的 Task。", 404);
+        }
+        foreach (TaskItem task in tasks)
+        {
             string version = request.Tasks.Single(x => x.TaskId == task.Id).RowVersion;
             ServiceError? error = ValidateVersion(task.RowVersion, version);
             if (error is not null)
@@ -237,6 +274,10 @@ internal sealed class TaskService : ITaskService
             !await _support.CanReadProjectAsync(projectId, cancellationToken))
         {
             return ServiceResult<bool>.Failure("forbidden", "沒有刪除 Task 的權限。", 403);
+        }
+        if (!await _support.ProjectExistsAsync(projectId, cancellationToken))
+        {
+            return ServiceResult<bool>.Failure("not_found", "找不到 Project。", 404);
         }
         TaskItem? task = await _db.TaskItems.SingleOrDefaultAsync(x => x.ProjectId == projectId && x.Id == taskId, cancellationToken);
         if (task is null)
@@ -277,12 +318,16 @@ internal sealed class TaskService : ITaskService
         }
     }
 
-    private async Task<ServiceError?> ValidateTaskAsync(Guid projectId, string title, Guid assignedAccountId,
+    private async Task<ServiceError?> ValidateTaskAsync(Guid projectId, string title, string? description, Guid assignedAccountId,
         DateTimeOffset startAt, DateTimeOffset deadline, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 300)
         {
             return new ServiceError("validation_error", "標題為必填且不得超過 300 字。", 400);
+        }
+        if (description?.Trim().Length > 8000)
+        {
+            return new ServiceError("validation_error", "描述不得超過 8000 字。", 400);
         }
         if (startAt > deadline)
         {

@@ -25,7 +25,12 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
     public DbSet<TaskItemHistory> TaskItemHistories => Set<TaskItemHistory>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<EmailMessage> EmailMessages => Set<EmailMessage>();
+    public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
+    public DbSet<EmailVerificationResendAttempt> EmailVerificationResendAttempts => Set<EmailVerificationResendAttempt>();
+    public DbSet<LoginFailureAttempt> LoginFailureAttempts => Set<LoginFailureAttempt>();
     public DbSet<BusinessCodeCounter> BusinessCodeCounters => Set<BusinessCodeCounter>();
+    public DbSet<ProjectReminderRun> ProjectReminderRuns => Set<ProjectReminderRun>();
+    public DbSet<TaskReminder> TaskReminders => Set<TaskReminder>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -43,8 +48,12 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
         builder.Entity<ApplicationUser>(entity =>
         {
             entity.ToTable("Accounts");
+            entity.Property(x => x.NormalizedEmail).HasMaxLength(256).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(100);
             entity.Property(x => x.Remark).HasMaxLength(500);
+            entity.HasIndex(x => x.NormalizedEmail)
+                .HasDatabaseName("EmailIndex")
+                .IsUnique();
         });
         builder.Entity<ApplicationRole>().ToTable("Roles");
         builder.Entity<ApplicationUserRole>(entity =>
@@ -83,6 +92,7 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
             entity.HasIndex(x => x.TokenHash).IsUnique();
             entity.HasIndex(x => new { x.AccountId, x.FamilyId });
             entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<RefreshToken>().WithMany().HasForeignKey(x => x.ReplacedByTokenId).OnDelete(DeleteBehavior.NoAction);
         });
         builder.Entity<UserPreference>(entity =>
         {
@@ -101,6 +111,7 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
             entity.Property(x => x.Code).HasMaxLength(50).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(200).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(4000);
+            entity.Property(x => x.TimeZoneId).HasMaxLength(100).IsRequired();
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
             entity.Property(x => x.VersionNumber).HasDefaultValue(1);
             entity.Property(x => x.RowVersion).IsRowVersion();
@@ -108,6 +119,7 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
             entity.HasIndex(x => new { x.OwnerAccountId, x.Status });
             entity.HasQueryFilter(x => x.DeletedAt == null);
             entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.OwnerAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.DeletedByAccountId).OnDelete(DeleteBehavior.NoAction);
         });
         builder.Entity<ProjectMember>(entity =>
         {
@@ -201,6 +213,30 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
             entity.HasIndex(x => new { x.EntityType, x.EntityId, x.CreatedAt });
             entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.ActorAccountId).OnDelete(DeleteBehavior.NoAction);
         });
+        builder.Entity<ProjectReminderRun>(entity =>
+        {
+            entity.ToTable("ProjectReminderRuns");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ReminderDate).HasColumnType("date");
+            entity.HasIndex(x => new { x.ProjectId, x.ReminderDate }).IsUnique();
+            entity.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+        });
+        builder.Entity<TaskReminder>(entity =>
+        {
+            entity.ToTable("TaskReminders");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ReminderDate).HasColumnType("date");
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
+            entity.Property(x => x.ProviderResponseId).HasMaxLength(500);
+            entity.Property(x => x.LastError).HasMaxLength(2000);
+            entity.Property(x => x.CancellationReason).HasMaxLength(200);
+            entity.HasIndex(x => new { x.TaskItemId, x.RecipientAccountId, x.ReminderDate }).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.NextAttemptAt });
+            entity.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne<TaskItem>().WithMany().HasForeignKey(x => x.TaskItemId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.RecipientAccountId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
         builder.Entity<EmailMessage>(entity =>
         {
             entity.ToTable("EmailMessages");
@@ -211,6 +247,40 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(30);
             entity.Property(x => x.LastError).HasMaxLength(2000);
             entity.HasIndex(x => new { x.Status, x.CreatedAt });
+        });
+        builder.Entity<EmailVerificationToken>(entity =>
+        {
+            entity.ToTable("EmailVerificationTokens");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => x.AccountId)
+                .IsUnique()
+                .HasFilter("[ActivatedAt] IS NOT NULL AND [UsedAt] IS NULL AND [InvalidatedAt] IS NULL");
+            entity.HasIndex(x => x.ExpiresAt);
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<EmailMessage>().WithOne().HasForeignKey<EmailVerificationToken>(x => x.EmailMessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<EmailVerificationResendAttempt>(entity =>
+        {
+            entity.ToTable("EmailVerificationResendAttempts");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ClientAddressHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30).IsRequired();
+            entity.HasIndex(x => new { x.ClientAddressHash, x.RequestedAt });
+            entity.HasIndex(x => new { x.AccountId, x.Outcome, x.RequestedAt });
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(x => x.AccountId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<LoginFailureAttempt>(entity =>
+        {
+            entity.ToTable("LoginFailureAttempts");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.AccountKeyHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.ClientAddressHash).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Outcome).HasConversion<string>().HasMaxLength(30).IsRequired();
+            entity.HasIndex(x => new { x.AccountKeyHash, x.Outcome, x.OccurredAt });
+            entity.HasIndex(x => new { x.ClientAddressHash, x.Outcome, x.OccurredAt });
         });
     }
 

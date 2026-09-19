@@ -93,6 +93,23 @@ public sealed class UserApiTests
         empty.GetProperty("items").GetArrayLength().Should().Be(0);
     }
 
+    // 測試案例：TC-ERR-USER-006（Bootstrap Admin 不得出現在使用者清單）
+    [Test]
+    public async Task 使用者清單應排除BootstrapAdmin且不計入總筆數()
+    {
+        (_, string adminAccount) = await CreateUserAsync(SystemRoles.Admin);
+        (Guid bootstrapId, _) = await CreateUserAsync(SystemRoles.Admin, account: _bootstrapAdminAccount);
+        using HttpClient admin = await CreateAuthenticatedClientAsync(adminAccount);
+
+        JsonElement result = await GetJsonAsync(
+            admin, $"/api/v1/users?search={Uri.EscapeDataString(_bootstrapAdminAccount)}");
+
+        result.GetProperty("totalCount").GetInt32().Should().Be(0);
+        result.GetProperty("items").GetArrayLength().Should().Be(0);
+        result.GetProperty("items").EnumerateArray()
+            .Should().NotContain(item => item.GetProperty("id").GetGuid() == bootstrapId);
+    }
+
     // 測試案例：TC-ERR-USER-002、TC-F-USER-009（本人／他人／不存在 ID 的 200、403、404 合併驗證）
     // 測試結果：Passed
     // 上次測試時間：2026-09-15 15:20:55 +08:00

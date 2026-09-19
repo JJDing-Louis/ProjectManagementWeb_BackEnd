@@ -33,7 +33,7 @@
 
 | Method | Route | Function／範圍 | Request | Success | 說明 |
 |---|---|---|---|---|---|
-| GET | `/api/v1/users` | `accounts.read` | `UserQuery` | 200 `PagedResult<UserResponse>` | 搜尋帳號、Email、姓名；可依角色篩選 |
+| GET | `/api/v1/users` | `accounts.read` | `UserQuery` | 200 `PagedResult<UserResponse>` | 搜尋帳號、Email、姓名；可依角色篩選；清單與總筆數皆排除系統預設 Admin |
 | GET | `/api/v1/users/{id}` | `accounts.read` 或本人 | 無 | 200 `UserResponse` | 其他帳號無權限時回傳 403 |
 | PUT | `/api/v1/users/{id}/role` | `accounts.manage-role` | `UpdateRoleRequest` | 200 `UserResponse` | Serializable transaction 內取代角色、撤銷 tokens；系統預設 Admin 不可修改 |
 | PATCH | `/api/v1/users/{id}/status` | `accounts.manage-status` | `UpdateUserStatusRequest` | 200 `UserResponse` | 啟停帳號、遞增 token version、撤銷 tokens；系統預設 Admin 不可修改 |

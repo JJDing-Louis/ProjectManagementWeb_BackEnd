@@ -41,6 +41,10 @@ internal sealed class UserService : IUserService
         int page = Math.Max(query.Page, 1);
         int pageSize = Math.Clamp(query.PageSize, 1, 100);
         IQueryable<ApplicationUser> users = _db.Users.AsNoTracking();
+        if (_bootstrapAdmin.NormalizedAccount is string normalizedBootstrapAdmin)
+        {
+            users = users.Where(user => user.NormalizedUserName != normalizedBootstrapAdmin);
+        }
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             string search = query.Search.Trim();

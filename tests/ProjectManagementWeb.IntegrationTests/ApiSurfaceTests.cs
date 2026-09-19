@@ -11,6 +11,9 @@ namespace ProjectManagementWeb.IntegrationTests;
 
 public sealed class ApiSurfaceTests
 {
+    private const string TestConnectionString =
+        "Server=localhost;Database=ProjectManagementWeb.Testing;User Id=not-used;Password=not-used;Encrypt=True;TrustServerCertificate=True";
+
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _client = null!;
 
@@ -20,6 +23,7 @@ public sealed class ApiSurfaceTests
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Environment", "Testing");
+            builder.UseSetting("ConnectionStrings:DefaultConnection", TestConnectionString);
             builder.UseSetting("ReminderJobs:Enabled", "false");
         });
         _client = _factory.CreateClient();
@@ -167,6 +171,7 @@ public sealed class ApiSurfaceTests
         using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment(environment);
+            builder.UseSetting("ConnectionStrings:DefaultConnection", TestConnectionString);
             builder.UseSetting("Jwt:PrivateKeyPem", privateKeyPem);
             builder.UseSetting("ReminderJobs:Enabled", "false");
             if (enabled is not null) builder.UseSetting("OpenApi:Enabled", enabled);

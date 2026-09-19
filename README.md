@@ -71,6 +71,19 @@ dotnet ef database update --project src/ProjectManagementWeb.Infrastructure --st
 dotnet run --project src/ProjectManagementWeb.Api
 ```
 
+### 使用 Rider 啟動
+
+Rider 不會自動載入 Docker Compose 的 `.env`。第一次以 Rider 直接啟動 API 前，請將本機 SQL Server 連線字串存入 .NET User Secrets：
+
+```bash
+dotnet user-secrets set \
+  --project src/ProjectManagementWeb.Api \
+  'ConnectionStrings:DefaultConnection' \
+  'Server=localhost,1433;Database=ProjectManagementWeb;User Id=pmw_app;Password=...;Encrypt=True;TrustServerCertificate=True'
+```
+
+接著在 Rider 選擇 `http` 或 `https` launch profile 啟動。User Secrets 只會在 Development 環境載入，且不會寫入 Git；若未設定連線字串，應用程式會在啟動時明確回報缺少 `ConnectionStrings:DefaultConnection`。
+
 Development 預設提供：
 
 - Health：`http://localhost:5080/health`（實際 port 依 launch profile）

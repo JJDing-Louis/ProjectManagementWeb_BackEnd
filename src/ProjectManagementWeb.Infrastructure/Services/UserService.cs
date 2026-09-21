@@ -71,16 +71,90 @@ internal sealed class UserService : IUserService
         return ServiceResult<PagedResult<UserResponse>>.Success(new PagedResult<UserResponse>(responses, page, pageSize, total));
     }
 
-    public async Task<ServiceResult<UserResponse>> GetUserAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<ServiceResult<UserDetailResponse>> GetUserAsync(Guid id, CancellationToken cancellationToken)
     {
         if (!_currentUser.HasFunction(SystemFunctions.AccountsRead) && _currentUser.AccountId != id)
         {
-            return ServiceResult<UserResponse>.Failure("forbidden", "沒有查詢帳號的權限。", 403);
+            return ServiceResult<UserDetailResponse>.Failure("forbidden", "沒有查詢帳號的權限。", 403);
         }
         ApplicationUser? user = await _userManager.FindByIdAsync(id.ToString());
         return user is null
-            ? ServiceResult<UserResponse>.Failure("not_found", "找不到帳號。", 404)
-            : ServiceResult<UserResponse>.Success(await MapAsync(user));
+            ? ServiceResult<UserDetailResponse>.Failure("not_found", "找不到帳號。", 404)
+            : ServiceResult<UserDetailResponse>.Success(await MapDetailAsync(user));
+    }
+
+    public async Task<ServiceResult<OwnProfileResponse>> GetOwnProfileAsync(CancellationToken cancellationToken)
+    {
+        if (_currentUser.AccountId is not Guid accountId)
+        {
+            return ServiceResult<OwnProfileResponse>.Failure("unauthorized", "尚未登入。", 401);
+        }
+
+        ApplicationUser? user = await _db.Users.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == accountId, cancellationToken);
+        return user is null
+            ? ServiceResult<OwnProfileResponse>.Failure("not_found", "找不到帳號。", 404)
+            : ServiceResult<OwnProfileResponse>.Success(MapOwnProfile(user));
+    }
+
+    public async Task<ServiceResult<OwnProfileResponse>> UpdateOwnProfileAsync(
+        UpdateOwnProfileRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.AccountId is not Guid accountId)
+        {
+            return ServiceResult<OwnProfileResponse>.Failure("unauthorized", "尚未登入。", 401);
+        }
+
+        IReadOnlyDictionary<string, string[]> validationErrors = OwnProfileValidator.Validate(request);
+        if (validationErrors.Count > 0)
+        {
+            return ServiceResult<OwnProfileResponse>.Failure(
+                "validation_error", "個人資料欄位驗證失敗。", 400, validationErrors);
+        }
+
+        ApplicationUser? user = await _userManager.FindByIdAsync(accountId.ToString());
+        if (user is null)
+        {
+            return ServiceResult<OwnProfileResponse>.Failure("not_found", "找不到帳號。", 404);
+        }
+
+        string name = request.Name.Trim();
+        string? phoneNumber = OwnProfileValidator.NormalizePhoneNumber(request.PhoneNumber);
+        bool phoneNumberChanged = !string.Equals(user.PhoneNumber, phoneNumber, StringComparison.Ordinal);
+        var changedFields = new List<string>(2);
+        if (!string.Equals(user.Name, name, StringComparison.Ordinal))
+        {
+            changedFields.Add("name");
+        }
+        if (phoneNumberChanged)
+        {
+            changedFields.Add("phoneNumber");
+        }
+        if (changedFields.Count == 0)
+        {
+            return ServiceResult<OwnProfileResponse>.Success(MapOwnProfile(user));
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        user.Name = name;
+        user.PhoneNumber = phoneNumber;
+        if (phoneNumberChanged)
+        {
+            user.PhoneNumberConfirmed = false;
+        }
+        IdentityResult result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+        {
+            return ServiceResult<OwnProfileResponse>.Failure(
+                "profile_update_failed", "無法更新個人資料。", 500);
+        }
+
+        _support.AddAudit("UpdateOwnProfile", "Account", user.Id.ToString(), null,
+            new { ChangedFields = changedFields }, _timeProvider.GetUtcNow());
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return ServiceResult<OwnProfileResponse>.Success(MapOwnProfile(user));
     }
 
     public async Task<ServiceResult<UserResponse>> ReplaceRoleAsync(Guid id, UpdateRoleRequest request, CancellationToken cancellationToken)
@@ -265,6 +339,17 @@ internal sealed class UserService : IUserService
             user.Name, user.EmailConfirmed, user.IsEnabled, roles.SingleOrDefault() ?? SystemRoles.Viewer,
             _bootstrapAdmin.IsBootstrapAdmin(user.UserName));
     }
+
+    private async Task<UserDetailResponse> MapDetailAsync(ApplicationUser user)
+    {
+        IList<string> roles = await _userManager.GetRolesAsync(user);
+        return new UserDetailResponse(user.Id, user.UserName ?? string.Empty, user.Email ?? string.Empty,
+            user.Name, user.PhoneNumber, user.EmailConfirmed, user.IsEnabled,
+            roles.SingleOrDefault() ?? SystemRoles.Viewer, _bootstrapAdmin.IsBootstrapAdmin(user.UserName));
+    }
+
+    private static OwnProfileResponse MapOwnProfile(ApplicationUser user) =>
+        new(user.Name ?? user.UserName ?? string.Empty, user.PhoneNumber);
 
     private static bool IsSqlServerDeadlock(Exception exception) =>
         exception is Microsoft.Data.SqlClient.SqlException { Number: 1205 } ||

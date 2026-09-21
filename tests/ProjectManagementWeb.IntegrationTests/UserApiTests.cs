@@ -116,12 +116,19 @@ public sealed class UserApiTests
     [Test]
     public async Task 使用者詳情應依本人與AccountsRead能力套用已確認的403與404優先序()
     {
-        (Guid userId, string userAccount) = await CreateUserAsync(SystemRoles.User);
-        (Guid viewerId, string viewerAccount) = await CreateUserAsync(SystemRoles.Viewer);
-        (Guid otherId, _) = await CreateUserAsync(SystemRoles.User);
+        (Guid userId, string userAccount) = await CreateUserAsync(
+            SystemRoles.User, name: "一般使用者名稱", phoneNumber: "0912-345-678");
+        (Guid viewerId, string viewerAccount) = await CreateUserAsync(
+            SystemRoles.Viewer, name: "瀏覽者名稱", phoneNumber: "+886 933-456-789");
+        (Guid otherId, _) = await CreateUserAsync(
+            SystemRoles.User, name: "他人名稱", phoneNumber: "02-2345-6789");
         (_, string adminAccount) = await CreateUserAsync(SystemRoles.Admin);
 
-        foreach ((Guid ownId, string account) in new[] { (userId, userAccount), (viewerId, viewerAccount) })
+        foreach ((Guid ownId, string account, string name, string phoneNumber) in new[]
+                 {
+                     (userId, userAccount, "一般使用者名稱", "0912-345-678"),
+                     (viewerId, viewerAccount, "瀏覽者名稱", "+886 933-456-789")
+                 })
         {
             using HttpClient client = await CreateAuthenticatedClientAsync(account);
             await AssertProblemAsync(await client.GetAsync("/api/v1/users"), HttpStatusCode.Forbidden, "forbidden");
@@ -133,6 +140,8 @@ public sealed class UserApiTests
             JsonElement own = await GetJsonAsync(client, $"/api/v1/users/{ownId}");
             own.GetProperty("id").GetGuid().Should().Be(ownId);
             own.GetProperty("account").GetString().Should().Be(account);
+            own.GetProperty("name").GetString().Should().Be(name);
+            own.GetProperty("phoneNumber").GetString().Should().Be(phoneNumber);
             own.GetProperty("emailConfirmed").GetBoolean().Should().BeTrue();
             own.GetProperty("isEnabled").GetBoolean().Should().BeTrue();
             own.GetProperty("isBootstrapAdmin").GetBoolean().Should().BeFalse();
@@ -141,6 +150,8 @@ public sealed class UserApiTests
         using HttpClient admin = await CreateAuthenticatedClientAsync(adminAccount);
         JsonElement other = await GetJsonAsync(admin, $"/api/v1/users/{otherId}");
         other.GetProperty("id").GetGuid().Should().Be(otherId);
+        other.GetProperty("name").GetString().Should().Be("他人名稱");
+        other.GetProperty("phoneNumber").GetString().Should().Be("02-2345-6789");
         await AssertProblemAsync(
             await admin.GetAsync($"/api/v1/users/{Guid.NewGuid()}"), HttpStatusCode.NotFound, "not_found");
     }
@@ -403,11 +414,89 @@ public sealed class UserApiTests
             .Should().Be(0);
     }
 
-    // 測試案例：TC-E-USER-008（現行 API 不提供帳號、名稱或 Email 編輯 contract）
-    // 測試結果：Passed
-    // 上次測試時間：2026-09-15 15:20:55 +08:00
     [Test]
-    public async Task OpenApi的使用者異動Dto應只包含角色狀態與偏好欄位()
+    public async Task 登入使用者可讀取修改並清除自己的名稱與電話且不影響他人()
+    {
+        (Guid accountId, string account) = await CreateUserAsync(
+            SystemRoles.Viewer, name: "原始名稱");
+        (Guid otherId, _) = await CreateUserAsync(SystemRoles.User, name: "其他使用者");
+        await SetPhoneNumberConfirmedAsync(accountId);
+        using HttpClient client = await CreateAuthenticatedClientAsync(account);
+
+        JsonElement initial = await GetJsonAsync(client, "/api/v1/users/me/profile");
+        initial.GetProperty("name").GetString().Should().Be("原始名稱");
+        initial.GetProperty("phoneNumber").ValueKind.Should().Be(JsonValueKind.Null);
+
+        JsonElement updated = await PutJsonAsync(
+            client,
+            "/api/v1/users/me/profile",
+            new { name = "  更新後名稱  ", phoneNumber = "  +886 912-345-678  " });
+        updated.GetProperty("name").GetString().Should().Be("更新後名稱");
+        updated.GetProperty("phoneNumber").GetString().Should().Be("+886 912-345-678");
+
+        JsonElement currentAccount = await GetJsonAsync(client, "/api/v1/auth/me");
+        currentAccount.GetProperty("name").GetString().Should().Be("更新後名稱");
+        JsonElement cleared = await PutJsonAsync(
+            client,
+            "/api/v1/users/me/profile",
+            new { name = "更新後名稱", phoneNumber = "   " });
+        cleared.GetProperty("phoneNumber").ValueKind.Should().Be(JsonValueKind.Null);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        ApplicationUser accountUser = await db.Users.AsNoTracking().SingleAsync(x => x.Id == accountId);
+        accountUser.Name.Should().Be("更新後名稱");
+        accountUser.PhoneNumber.Should().BeNull();
+        accountUser.PhoneNumberConfirmed.Should().BeFalse();
+        ApplicationUser otherUser = await db.Users.AsNoTracking().SingleAsync(x => x.Id == otherId);
+        otherUser.Name.Should().Be("其他使用者");
+        otherUser.PhoneNumber.Should().BeNull();
+
+        AuditLog[] audits = await db.AuditLogs.AsNoTracking()
+            .Where(x => x.ActorAccountId == accountId && x.Action == "UpdateOwnProfile")
+            .OrderBy(x => x.CreatedAt)
+            .ToArrayAsync();
+        audits.Should().HaveCount(2);
+        audits[0].AfterData.Should().Contain("name").And.Contain("phoneNumber");
+        audits.Select(x => x.AfterData).Should().NotContain(value =>
+            value!.Contains("更新後名稱", StringComparison.Ordinal) ||
+            value.Contains("+886 912-345-678", StringComparison.Ordinal));
+    }
+
+    [Test]
+    public async Task 個人資料更新應拒絕空白過長名稱及無效電話並保持原資料()
+    {
+        (Guid accountId, string account) = await CreateUserAsync(SystemRoles.User, name: "原始名稱");
+        using HttpClient client = await CreateAuthenticatedClientAsync(account);
+
+        foreach ((object Body, string Field) invalid in new (object, string)[]
+                 {
+                     (new { name = "   ", phoneNumber = (string?)null }, "name"),
+                     (new { name = new string('名', 101), phoneNumber = (string?)null }, "name"),
+                     (new { name = "有效名稱", phoneNumber = "invalid-phone" }, "phoneNumber"),
+                     (new { name = "有效名稱", phoneNumber = new string('1', 31) }, "phoneNumber")
+                 })
+        {
+            HttpResponseMessage response = await client.PutAsJsonAsync("/api/v1/users/me/profile", invalid.Body);
+            string body = await response.Content.ReadAsStringAsync();
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
+            JsonElement problem = JsonDocument.Parse(body).RootElement;
+            problem.GetProperty("code").GetString().Should().Be("validation_error");
+            problem.GetProperty("errors").TryGetProperty(invalid.Field, out JsonElement messages).Should().BeTrue();
+            messages.GetArrayLength().Should().BeGreaterThan(0);
+        }
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        ApplicationUser accountUser = await db.Users.AsNoTracking().SingleAsync(x => x.Id == accountId);
+        accountUser.Name.Should().Be("原始名稱");
+        accountUser.PhoneNumber.Should().BeNull();
+        (await db.AuditLogs.CountAsync(x =>
+            x.ActorAccountId == accountId && x.Action == "UpdateOwnProfile")).Should().Be(0);
+    }
+
+    [Test]
+    public async Task OpenApi應只開放名稱電話角色狀態與偏好等已確認的使用者異動欄位()
     {
         using HttpClient client = _factory.CreateClient();
         JsonElement openApi = await GetJsonAsync(client, "/openapi/v1.json");
@@ -421,6 +510,8 @@ public sealed class UserApiTests
             .Select(x => x.Name).Should().BeEquivalentTo("roleId", "isEnabled");
         schemas.GetProperty("UpdatePreferenceRequest").GetProperty("properties").EnumerateObject()
             .Select(x => x.Name).Should().Equal("skipBatchConfirmation");
+        schemas.GetProperty("UpdateOwnProfileRequest").GetProperty("properties").EnumerateObject()
+            .Select(x => x.Name).Should().BeEquivalentTo("name", "phoneNumber");
     }
 
     // 測試案例：TC-ERR-USER-005（最後一位 Admin 的降級、停用與兩請求並行競態）
@@ -504,7 +595,8 @@ public sealed class UserApiTests
     }
 
     private async Task<(Guid Id, string Account)> CreateUserAsync(
-        string role, bool emailConfirmed = true, bool enabled = true, string? account = null, string? name = null)
+        string role, bool emailConfirmed = true, bool enabled = true, string? account = null,
+        string? name = null, string? phoneNumber = null)
     {
         string suffix = Guid.NewGuid().ToString("N");
         account ??= $"user-api-{role.ToLowerInvariant()}-{suffix}";
@@ -514,6 +606,7 @@ public sealed class UserApiTests
             UserName = account,
             Email = $"{account}@example.test",
             Name = name ?? $"{role} API 測試帳號",
+            PhoneNumber = phoneNumber,
             EmailConfirmed = emailConfirmed,
             IsEnabled = enabled
         };
@@ -577,6 +670,14 @@ public sealed class UserApiTests
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         return await db.Users.Where(x => x.Id == accountId).Select(x => x.TokenVersion).SingleAsync();
+    }
+
+    private async Task SetPhoneNumberConfirmedAsync(Guid accountId)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await db.Users.Where(x => x.Id == accountId).ExecuteUpdateAsync(
+            updates => updates.SetProperty(x => x.PhoneNumberConfirmed, true));
     }
 
     private async Task<(string Role, bool Enabled, int TokenVersion)> GetUserStateAsync(Guid accountId)

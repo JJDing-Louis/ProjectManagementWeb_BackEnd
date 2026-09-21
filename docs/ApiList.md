@@ -34,10 +34,12 @@
 | Method | Route | Function／範圍 | Request | Success | 說明 |
 |---|---|---|---|---|---|
 | GET | `/api/v1/users` | `accounts.read` | `UserQuery` | 200 `PagedResult<UserResponse>` | 搜尋帳號、Email、姓名；可依角色篩選；清單與總筆數皆排除系統預設 Admin |
-| GET | `/api/v1/users/{id}` | `accounts.read` 或本人 | 無 | 200 `UserResponse` | 其他帳號無權限時回傳 403 |
+| GET | `/api/v1/users/{id}` | `accounts.read` 或本人 | 無 | 200 `UserDetailResponse` | 回傳帳號、名稱、電話、Email、驗證與權限資料；其他帳號無權限時回傳 403 |
 | PUT | `/api/v1/users/{id}/role` | `accounts.manage-role` | `UpdateRoleRequest` | 200 `UserResponse` | Serializable transaction 內取代角色、撤銷 tokens；系統預設 Admin 不可修改 |
 | PATCH | `/api/v1/users/{id}/status` | `accounts.manage-status` | `UpdateUserStatusRequest` | 200 `UserResponse` | 啟停帳號、遞增 token version、撤銷 tokens；系統預設 Admin 不可修改 |
 | PUT | `/api/v1/users/{id}/administration` | `accounts.manage-role` 與 `accounts.manage-status` | `UpdateAdministrationRequest` | 200 `UserResponse` | Serializable transaction 原子更新角色與狀態；系統預設 Admin 不可修改 |
+| GET | `/api/v1/users/me/profile` | 任一已登入帳號 | 無 | 200 `OwnProfileResponse` | 讀取自己的顯示名稱與電話號碼 |
+| PUT | `/api/v1/users/me/profile` | 任一已登入帳號 | `UpdateOwnProfileRequest` | 200 `OwnProfileResponse` | 更新自己的顯示名稱與電話號碼；電話可清除 |
 | GET | `/api/v1/users/me/preferences` | `preferences.read-own` | 無 | 200 `PreferenceResponse` | 讀取自己的批次確認偏好 |
 | PUT | `/api/v1/users/me/preferences` | `preferences.update-own` | `UpdatePreferenceRequest` | 200 `PreferenceResponse` | 更新自己的批次確認偏好 |
 | GET | `/api/v1/roles` | 任一已登入帳號 | 無 | 200 `RoleResponse[]` | 回傳固定系統角色及各自 Functions |

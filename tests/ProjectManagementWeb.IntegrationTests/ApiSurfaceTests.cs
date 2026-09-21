@@ -24,6 +24,7 @@ public sealed class ApiSurfaceTests
         {
             builder.UseSetting("Environment", "Testing");
             builder.UseSetting("ConnectionStrings:DefaultConnection", TestConnectionString);
+            builder.UseSetting("BootstrapAdmin:Account", string.Empty);
             builder.UseSetting("ReminderJobs:Enabled", "false");
         });
         _client = _factory.CreateClient();
@@ -32,8 +33,8 @@ public sealed class ApiSurfaceTests
     [TearDown]
     public void TearDown()
     {
-        _client.Dispose();
-        _factory.Dispose();
+        _client?.Dispose();
+        _factory?.Dispose();
     }
 
     // 測試案例：TC-F-AUTH-020（僅 CSRF endpoint 與 cookie；部分覆蓋）
@@ -113,6 +114,7 @@ public sealed class ApiSurfaceTests
         document.Should().Contain("/api/v1/auth/login");
         document.Should().Contain("/api/v1/projects/{projectId}/task-items");
         document.Should().Contain("/api/v1/users/{id}/administration");
+        document.Should().Contain("/api/v1/users/me/profile");
         document.Should().Contain("/api/v1/projects/{id}/member-candidates");
 
         using JsonDocument openApi = JsonDocument.Parse(document);
@@ -172,6 +174,7 @@ public sealed class ApiSurfaceTests
         {
             builder.UseEnvironment(environment);
             builder.UseSetting("ConnectionStrings:DefaultConnection", TestConnectionString);
+            builder.UseSetting("BootstrapAdmin:Account", string.Empty);
             builder.UseSetting("Jwt:PrivateKeyPem", privateKeyPem);
             builder.UseSetting("ReminderJobs:Enabled", "false");
             if (enabled is not null) builder.UseSetting("OpenApi:Enabled", enabled);

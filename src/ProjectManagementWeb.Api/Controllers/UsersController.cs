@@ -24,8 +24,18 @@ public sealed class UsersController : ApiControllerBase
         FromResult(await _users.GetUsersAsync(query, cancellationToken));
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<UserResponse>> GetUser(Guid id, CancellationToken cancellationToken) =>
+    public async Task<ActionResult<UserDetailResponse>> GetUser(Guid id, CancellationToken cancellationToken) =>
         FromResult(await _users.GetUserAsync(id, cancellationToken));
+
+    [HttpGet("me/profile")]
+    public async Task<ActionResult<OwnProfileResponse>> GetOwnProfile(CancellationToken cancellationToken) =>
+        FromResult(await _users.GetOwnProfileAsync(cancellationToken));
+
+    [HttpPut("me/profile")]
+    public async Task<ActionResult<OwnProfileResponse>> UpdateOwnProfile(
+        UpdateOwnProfileRequest request,
+        CancellationToken cancellationToken) =>
+        FromResult(await _users.UpdateOwnProfileAsync(request, cancellationToken));
 
     [HttpPut("{id:guid}/role")]
     public async Task<ActionResult<UserResponse>> ReplaceRole(Guid id, UpdateRoleRequest request, CancellationToken cancellationToken) =>

@@ -1,6 +1,6 @@
 # API 清單
 
-本文件依 `src/ProjectManagementWeb.Api/Controllers`、Application contracts 與 Infrastructure services 整理，反映目前程式碼實作。API 基底路徑為 `/api/v1`，JSON enum 以字串傳輸。
+本文件依 `src/ProjectManagementWeb.Api/Controllers`、Application contracts 與 Infrastructure services 整理，反映目前程式碼實作。API 基底路徑為 `/api/v1`，JSON enum 以字串傳輸；目前共有 40 個 `/api/v1` Controller actions。
 
 ## 共通規則
 
@@ -21,12 +21,12 @@
 | Method | Route | Auth | CSRF | Request | Success | 說明 |
 |---|---|---:|---:|---|---|---|
 | GET | `/api/v1/security/csrf-token` | 否 | 否 | 無 | 200 `{ token }` | 建立 antiforgery cookie 並回傳 request token |
-| POST | `/api/v1/auth/register` | 否 | 是 | `RegisterRequest` | 201 `{ accountId, verificationEmailSent }` | 建立帳號、Viewer 角色與偏好；寄信失敗不回滾帳號，並以旗標通知前端 |
-| POST | `/api/v1/auth/login` | 否 | 是 | `LoginRequest` | 200 access token；設定 refresh cookie | Email 未驗證仍可登入，但有效角色固定為 Viewer |
+| POST | `/api/v1/auth/register` | 否 | 是 | `RegisterRequest` | 201 `{ accountId, verificationEmailSent }` | 需提供 account、password、confirmPassword、email、name；建立 Viewer 與偏好；寄信失敗不回滾帳號 |
+| POST | `/api/v1/auth/login` | 否 | 是 | `LoginRequest` | 200 access token；設定 refresh cookie | Email 未驗證仍可登入，但有效角色固定為 Viewer；帳號或來源 IP 於 15 分鐘內累積 5 次失敗後回傳 429 |
 | POST | `/api/v1/auth/refresh` | 否 | 是 | Refresh Cookie | 200 access token；輪替 refresh cookie | 舊 token 重用時撤銷同一 family |
 | POST | `/api/v1/auth/logout` | 否 | 是 | Refresh Cookie，可省略 | 204 | 撤銷目前 refresh token 並刪除 cookie |
-| POST | `/api/v1/auth/email/confirm` | 否 | 是 | `ConfirmEmailRequest` | 200 `true` | 驗證 Identity Email token |
-| POST | `/api/v1/auth/email/resend` | 否 | 是 | `ResendEmailRequest` | 200 `true` | 不洩漏帳號是否存在；符合條件才重新寄送 |
+| POST | `/api/v1/auth/email/confirm` | 否 | 是 | `ConfirmEmailRequest` | 200 `true` | 驗證 32-byte opaque token；token 有效期 3 分鐘且只能使用一次 |
+| POST | `/api/v1/auth/email/resend` | 否 | 是 | `ResendEmailRequest` | 200 `true`，來源 IP 超限時 429 | 不洩漏帳號是否存在；帳號冷卻 60 秒，帳號／IP 於 60 分鐘內最多允許 5 次 |
 | GET | `/api/v1/auth/me` | 是 | 否 | 無 | 200 `CurrentAccountResponse` | 回傳目前帳號、唯一系統角色及 Functions |
 
 ## Users、Roles 與 Preferences
@@ -38,8 +38,8 @@
 | PUT | `/api/v1/users/{id}/role` | `accounts.manage-role` | `UpdateRoleRequest` | 200 `UserResponse` | Serializable transaction 內取代角色、撤銷 tokens；系統預設 Admin 不可修改 |
 | PATCH | `/api/v1/users/{id}/status` | `accounts.manage-status` | `UpdateUserStatusRequest` | 200 `UserResponse` | 啟停帳號、遞增 token version、撤銷 tokens；系統預設 Admin 不可修改 |
 | PUT | `/api/v1/users/{id}/administration` | `accounts.manage-role` 與 `accounts.manage-status` | `UpdateAdministrationRequest` | 200 `UserResponse` | Serializable transaction 原子更新角色與狀態；系統預設 Admin 不可修改 |
-| GET | `/api/v1/users/me/profile` | 任一已登入帳號 | 無 | 200 `OwnProfileResponse` | 讀取自己的顯示名稱與電話號碼 |
-| PUT | `/api/v1/users/me/profile` | 任一已登入帳號 | `UpdateOwnProfileRequest` | 200 `OwnProfileResponse` | 更新自己的顯示名稱與電話號碼；電話可清除 |
+| GET | `/api/v1/users/me/profile` | 任一已登入帳號 | 無 | 200 `OwnProfileResponse` | 只回傳自己的顯示名稱與電話號碼 |
+| PUT | `/api/v1/users/me/profile` | 任一已登入帳號 | `UpdateOwnProfileRequest` | 200 `OwnProfileResponse` | 名稱必填且最多 100 字；電話可清除、最多 30 字；電話異動會重設 PhoneNumberConfirmed 並寫入 AuditLog |
 | GET | `/api/v1/users/me/preferences` | `preferences.read-own` | 無 | 200 `PreferenceResponse` | 讀取自己的批次確認偏好 |
 | PUT | `/api/v1/users/me/preferences` | `preferences.update-own` | `UpdatePreferenceRequest` | 200 `PreferenceResponse` | 更新自己的批次確認偏好 |
 | GET | `/api/v1/roles` | 任一已登入帳號 | 無 | 200 `RoleResponse[]` | 回傳固定系統角色及各自 Functions |
@@ -55,7 +55,7 @@
 | DELETE | `/api/v1/projects/{id}?rowVersion=...` | 系統角色 `Administrator` 或 `Admin` | query `rowVersion` | 204 | 軟刪除 Project，記錄 `DeletedAt`、`DeletedByAccountId` 與 AuditLog；子資料保留並由 Project scope 隱藏 |
 | GET | `/api/v1/projects/roles` | 任一已登入帳號 | 無 | 200 `ProjectRoleResponse[]` | 回傳固定專案角色 |
 | GET | `/api/v1/projects/{id}/members` | 全域管理或專案成員 | 無 | 200 `ProjectMemberResponse[]` | 每位成員包含多筆專案角色 |
-| GET | `/api/v1/projects/{id}/member-candidates` | 非 Viewer，且為全域管理或 ProjectManager | `search`、`page`、`pageSize` | 200 `PagedResult<ProjectMemberCandidateResponse>` | 僅回傳帳號 ID、帳號及姓名，並排除既有成員與系統預設 Admin |
+| GET | `/api/v1/projects/{id}/member-candidates` | 非 Viewer，且為全域管理或 ProjectManager | `MemberCandidateQuery` | 200 `PagedResult<MemberCandidateResponse>` | 支援 search、page、pageSize；僅回傳帳號 ID、帳號及姓名，並排除既有成員與系統預設 Admin |
 | POST | `/api/v1/projects/{id}/members` | 非 Viewer，且為全域管理或 ProjectManager | `SaveProjectMemberRequest` | 200 `ProjectMemberResponse` | `projectRoleIds` 至少一筆且必須全部有效；拒絕系統預設 Admin |
 | PUT | `/api/v1/projects/{id}/members/{accountId}` | 非 Viewer，且為全域管理或 ProjectManager | `UpdateProjectMemberRequest` | 200 `ProjectMemberResponse` | 以陣列取代該成員全部專案角色 |
 | DELETE | `/api/v1/projects/{id}/members/{accountId}` | 非 Viewer，且為全域管理或 ProjectManager | 無 | 204 | Owner 必須先移交；有未完成 Task 必須先重新指派 |
@@ -105,6 +105,7 @@ Task 列表允許的 `sortBy` 為 `createdAt`（預設）、`deadline`、`status
 | 404 | 帳號、專案、成員、Task 或留言不存在 |
 | 409 | UNIQUE、最後一位 Admin、Owner／Task 阻擋、rowversion 衝突，或每日編號超過上限（`daily_code_limit_exceeded`） |
 | 422 | Email 未驗證角色提升、Owner／指派者／專案角色／期限等業務驗證失敗 |
+| 429 | 登入失敗或 Email 驗證信重寄達到防濫用限制 |
 | 500 | 未預期例外，或 Identity 角色異動失敗 |
 
 完整 request／response 欄位與前端實作規則請參閱 [FrontendContract.md](FrontendContract.md)。

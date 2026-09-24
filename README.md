@@ -6,7 +6,7 @@ ProjectManagementWeb 的 ASP.NET Core Web API 後端 MVP。採前後端分離、
 
 | 文件 | 內容 |
 |---|---|
-| [API 清單](docs/ApiList.md) | 38 個 `/api/v1` endpoint、授權範圍、request 與 status code |
+| [API 清單](docs/ApiList.md) | 40 個 `/api/v1` endpoint、授權範圍、request 與 status code |
 | [系統架構](docs/Architecture.md) | C4 Level 3 Component Diagram、主要請求流程與 Compose 部署關係 |
 | [資料表 Schema](docs/TableSchema.md) | 26 張應用資料表的欄位、PK、FK、index、刪除行為與現行風險；另說明 Hangfire SQL schema |
 | [E-R Diagram](docs/E-R_Diagram.md) | Identity／RBAC、專案／Task 與系統紀錄關聯圖 |
@@ -18,6 +18,7 @@ ProjectManagementWeb 的 ASP.NET Core Web API 後端 MVP。採前後端分離、
 - ASP.NET Core Identity（Guid 主鍵）
 - EF Core 10、SQL Server 2022、migration 版本控制
 - RSA JWT Access Token（15 分鐘）與 opaque Refresh Token（7 天、HttpOnly Cookie、rotation）
+- Hangfire 1.8、SQL Server storage、Project 當地時區 Task 到期提醒
 - OpenAPI 3、Swagger UI
 - NUnit 4、Moq、Bogus、FluentAssertions 7.2.2
 - Docker multi-stage build 與 Docker Compose
@@ -39,7 +40,7 @@ ProjectManagementWeb_BackEnd/
 │   ├── ProjectManagementWeb.Api/              # Controllers、HTTP pipeline、授權入口
 │   ├── ProjectManagementWeb.Application/      # Contracts、DTO、service interfaces
 │   ├── ProjectManagementWeb.Domain/           # Entities、roles、functions、enums
-│   └── ProjectManagementWeb.Infrastructure/   # EF Core、Identity、JWT、SMTP、services
+│   └── ProjectManagementWeb.Infrastructure/   # EF Core、Identity、JWT、SMTP、Hangfire、services
 ├── tests/
 │   ├── ProjectManagementWeb.UnitTests/
 │   └── ProjectManagementWeb.IntegrationTests/
@@ -58,6 +59,16 @@ API 使用傳統 `Program.Main` 進入點，不使用 Top-level statements；組
 - 每個帳號在同一專案只有一筆 `ProjectMember`，可透過 `ProjectMemberRoles` 擁有多個專案角色。
 - `ProjectManager` 採資源型授權；`Viewer` 即使被誤配為 ProjectManager 也不能寫入。
 - 異動系統角色或停用帳號會讓既有 JWT 的 token version 失效，並撤銷全部 Refresh Token。
+- Bootstrap Admin 由 `BootstrapAdmin:Account` 識別，使用者清單與成員候選會排除該帳號，角色與狀態不可由 API 修改，亦不能透過新增成員 API 加入專案。
+- 本人可維護顯示名稱與電話；電話變更會清除 `PhoneNumberConfirmed`，並在 `AuditLogs` 留下異動欄位紀錄。
+
+## Auth 安全邊界
+
+- 註冊要求帳號、Email、顯示名稱、密碼及確認密碼；密碼至少 10 字元並包含大小寫英文字母、數字與特殊字元。
+- Email 驗證使用 32-byte opaque token，資料庫只保存 SHA-256 hash；成功寄送後啟用、3 分鐘到期且只能使用一次。
+- Email 驗證信重寄採帳號 60 秒冷卻，以及帳號／來源 IP 每 60 分鐘 5 次限制。
+- 登入失敗以帳號鍵與來源 IP 的 hash 記錄；任一方於 15 分鐘內累積 5 次即回傳 HTTP 429。
+- 只有明確設定可信 `ReverseProxy:KnownProxies` 或 `KnownNetworks` 時才處理 forwarded headers，避免偽造來源 IP。
 
 ## 本機執行
 
@@ -66,8 +77,10 @@ API 使用傳統 `Program.Main` 進入點，不使用 Top-level statements；組
 ```bash
 export ConnectionStrings__DefaultConnection='Server=localhost,1433;Database=ProjectManagementWeb;User Id=pmw_app;Password=...;Encrypt=True;TrustServerCertificate=True'
 export Jwt__PrivateKeyPem="$(cat /path/to/private-key.pem)"
+export PMW_MIGRATION_DEFAULT_TIME_ZONE_ID='Asia/Taipei'
 dotnet tool restore
 dotnet ef database update --project src/ProjectManagementWeb.Infrastructure --startup-project src/ProjectManagementWeb.Api
+Hangfire__PrepareSchemaIfNecessary=true dotnet run --project src/ProjectManagementWeb.Api -- --initialize-hangfire
 dotnet run --project src/ProjectManagementWeb.Api
 ```
 
@@ -86,7 +99,7 @@ dotnet user-secrets set \
 
 Development 預設提供：
 
-- Health：`http://localhost:5080/health`（實際 port 依 launch profile）
+- Health：`http://localhost:5062/health`（實際 port 依 launch profile）
 - OpenAPI：`/openapi/v1.json`
 - Swagger UI：`/swagger`
 
@@ -105,7 +118,7 @@ docker compose config
 docker compose up --build
 ```
 
-啟動順序是 SQL Server health check、建立 migration／API 專用登入、套用 EF migration、啟動 API。SA 只用於初始化；migration 使用 `pmw_migrator`，API 使用只有資料讀寫權限的 `pmw_app`。
+啟動順序是 SQL Server health check、建立 migration／API 專用登入、套用 EF migrations、初始化 Hangfire schema、啟動 API。SA 只用於初始化；migration 使用 `pmw_migrator`，API 使用只有資料讀寫權限的 `pmw_app`。
 
 首次部署可透過 `BOOTSTRAP_ADMIN_ACCOUNT`、`BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_PASSWORD` 建立第一位已驗證 Admin；後續啟動會確保此帳號維持啟用且系統角色固定為 `Admin`，但不會改動其他帳號資料。完成初始化後仍須保留 Bootstrap 帳號設定供保護規則識別，密碼則應從部署環境移除。
 

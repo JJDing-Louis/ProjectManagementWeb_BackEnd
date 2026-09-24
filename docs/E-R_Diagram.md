@@ -153,6 +153,7 @@ erDiagram
     }
 
     ACCOUNTS ||--o{ PROJECTS : owns
+    ACCOUNTS o|--o{ PROJECTS : deletes
     PROJECTS ||--o{ PROJECT_MEMBERS : contains
     ACCOUNTS ||--o{ PROJECT_MEMBERS : joins
     PROJECT_MEMBERS ||--o{ PROJECT_MEMBER_ROLES : receives
@@ -174,7 +175,7 @@ erDiagram
 
 圖中的 `Code UK` 對 Projects 與 TaskItems 實際是帶有 `[DeletedAt] IS NULL` 的 filtered unique index。軟刪除資料不參與唯一性判斷。
 
-## 系統紀錄
+## 安全與系統紀錄
 
 ```mermaid
 erDiagram
@@ -198,6 +199,30 @@ erDiagram
         datetimeoffset CreatedAt
         datetimeoffset SentAt
     }
+    EMAIL_VERIFICATION_TOKENS {
+        uniqueidentifier Id PK
+        uniqueidentifier AccountId FK,UK
+        uniqueidentifier EmailMessageId FK,UK
+        nvarchar TokenHash UK
+        datetimeoffset ExpiresAt
+        datetimeoffset ActivatedAt
+        datetimeoffset UsedAt
+        datetimeoffset InvalidatedAt
+    }
+    EMAIL_VERIFICATION_RESEND_ATTEMPTS {
+        uniqueidentifier Id PK
+        uniqueidentifier AccountId FK
+        nvarchar ClientAddressHash
+        datetimeoffset RequestedAt
+        nvarchar Outcome
+    }
+    LOGIN_FAILURE_ATTEMPTS {
+        uniqueidentifier Id PK
+        nvarchar AccountKeyHash
+        nvarchar ClientAddressHash
+        datetimeoffset OccurredAt
+        nvarchar Outcome
+    }
     BUSINESS_CODE_COUNTERS {
         nvarchar CodeType PK
         date BusinessDate PK
@@ -205,10 +230,15 @@ erDiagram
     }
 
     ACCOUNTS o|--o{ AUDIT_LOGS : performs
+    ACCOUNTS ||--o{ EMAIL_VERIFICATION_TOKENS : owns
+    EMAIL_MESSAGES ||--o| EMAIL_VERIFICATION_TOKENS : activates
+    ACCOUNTS o|--o{ EMAIL_VERIFICATION_RESEND_ATTEMPTS : requests
 ```
 
 - `AuditLogs.ActorAccountId` 可為 null，以支援系統操作；FK 採 `NoAction`，避免刪除帳號時破壞稽核資料。
-- `EmailMessages` 目前是獨立寄送紀錄，只保存 Recipient，沒有對 `Accounts` 建立 FK。
+- `EmailMessages` 不直接參照 Account，但可透過一對一的 `EmailVerificationTokens.EmailMessageId` 對應驗證信；一般郵件與 Task 提醒信不一定有 Token。
+- `EmailVerificationTokens` 只保存 Token hash；同一帳號透過 filtered UNIQUE index 同時最多一個已啟用、未使用且未失效的 Token。
+- `EmailVerificationResendAttempts.AccountId` 可為 null；`LoginFailureAttempts` 完全不保存 Account FK。兩者以 SHA-256 hash 保存來源識別資訊，供多執行個體共用防濫用視窗。
 - `BusinessCodeCounters` 是無外鍵的 Project／Task UTC 每日計數器，複合主鍵為 `(CodeType, BusinessDate)`。
 - `RefreshTokens.ReplacedByTokenId` 已是 Delete NoAction 的 self-FK；提醒另以 Project／當地日期與 Task／收件人／提醒日期兩組 UNIQUE 保證冪等。
 

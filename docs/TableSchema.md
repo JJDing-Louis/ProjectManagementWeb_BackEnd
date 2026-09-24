@@ -42,6 +42,8 @@ ASP.NET Core Identity 帳號資料。
 | `IsEnabled` | `bit` | 否 |  | 帳號是否啟用 |
 | `TokenVersion` | `int` | 否 |  | JWT 失效版本 |
 
+`PhoneNumber` 的資料庫型別沿用 Identity 的 `nvarchar(max)`，但個人資料 API 以 Application validator 限制為最多 30 字。`IsBootstrapAdmin` 不是資料庫欄位，而是以 `BootstrapAdmin:Account` 與 `NormalizedUserName` 即時計算。
+
 ### Roles
 
 | 欄位 | 型別 | Null | Key／Constraint | 說明 |
@@ -245,11 +247,43 @@ Project 與 Task 的 UTC 每日業務編號計數器。產生編號與建立實�
 
 `EmailMessages` 目前以 Recipient 保存收件資訊，沒有對 `Accounts` 建立 Foreign Key。
 
-### EmailVerificationTokens、EmailVerificationResendAttempts、LoginFailureAttempts
+### EmailVerificationTokens
 
-- `EmailVerificationTokens` 保存 AccountId、EmailMessageId、SHA-256 TokenHash、CreatedAt、ExpiresAt、ActivatedAt、UsedAt、InvalidatedAt；TokenHash UNIQUE，EmailMessageId 一對一 UNIQUE，同帳號同時最多一個有效 Token。
-- `EmailVerificationResendAttempts` 保存 nullable AccountId、SHA-256 ClientAddressHash、RequestedAt、Outcome；相關 index 支援帳號 60 秒冷卻與帳號／IP 滾動 60 分鐘上限，不保存 IP 原文。
-- `LoginFailureAttempts` 保存 SHA-256 AccountKeyHash、SHA-256 ClientAddressHash、OccurredAt、Outcome；相關 index 支援跨執行個體共用的 15 分鐘帳號／IP 失敗限制，不保存帳號或 IP 原文。
+| 欄位 | 型別 | Null | Key／Constraint | 說明 |
+|---|---|---:|---|---|
+| `Id` | `uniqueidentifier` | 否 | PK | Token lifecycle ID |
+| `AccountId` | `uniqueidentifier` | 否 | FK → `Accounts.Id`、filtered UNIQUE | 刪除 Account 時 cascade；同帳號最多一個已啟用且未使用／失效的 Token |
+| `EmailMessageId` | `uniqueidentifier` | 否 | FK → `EmailMessages.Id`、UNIQUE | 與寄送紀錄一對一，刪除郵件紀錄時 cascade |
+| `TokenHash` | `nvarchar(64)` | 否 | UNIQUE | 32-byte opaque token 的 SHA-256 hash，不保存原文 |
+| `CreatedAt` | `datetimeoffset` | 否 |  | 建立時間 |
+| `ExpiresAt` | `datetimeoffset` | 否 | INDEX | 建立後 3 分鐘到期 |
+| `ActivatedAt` | `datetimeoffset` | 是 | filtered UNIQUE 條件 | 郵件成功送出後才啟用 |
+| `UsedAt` | `datetimeoffset` | 是 | filtered UNIQUE 條件 | 成功確認時間，只能使用一次 |
+| `InvalidatedAt` | `datetimeoffset` | 是 | filtered UNIQUE 條件 | 新 Token 啟用時使舊 Token 失效 |
+
+### EmailVerificationResendAttempts
+
+| 欄位 | 型別 | Null | Key／Constraint | 說明 |
+|---|---|---:|---|---|
+| `Id` | `uniqueidentifier` | 否 | PK | 重寄嘗試 ID |
+| `AccountId` | `uniqueidentifier` | 是 | FK → `Accounts.Id` | 帳號不存在時仍記錄嘗試但不洩漏存在性；刪除 Account 時 cascade |
+| `ClientAddressHash` | `nvarchar(64)` | 否 | INDEX with RequestedAt | 來源 IP 的 SHA-256 hash，不保存 IP 原文 |
+| `RequestedAt` | `datetimeoffset` | 否 | 複合 INDEX | 請求時間 |
+| `Outcome` | `nvarchar(30)` | 否 | INDEX with AccountId/RequestedAt | `Allowed`、`NotEligible`、`CooldownLimited`、`AccountLimited`、`IpLimited` |
+
+資料支援同帳號 60 秒冷卻，以及帳號／來源 IP 各自在滾動 60 分鐘內最多 5 次的限制。只有來源 IP 超限對外回傳 429；其他不可寄送狀態仍回傳通用成功語意，避免帳號枚舉。
+
+### LoginFailureAttempts
+
+| 欄位 | 型別 | Null | Key／Constraint | 說明 |
+|---|---|---:|---|---|
+| `Id` | `uniqueidentifier` | 否 | PK | 登入安全紀錄 ID |
+| `AccountKeyHash` | `nvarchar(64)` | 否 | INDEX with Outcome/OccurredAt | 正規化帳號鍵的 SHA-256 hash，不保存帳號原文 |
+| `ClientAddressHash` | `nvarchar(64)` | 否 | INDEX with Outcome/OccurredAt | 來源 IP 的 SHA-256 hash，不保存 IP 原文 |
+| `OccurredAt` | `datetimeoffset` | 否 | 複合 INDEX | 發生時間 |
+| `Outcome` | `nvarchar(30)` | 否 | 複合 INDEX | `InvalidCredentials` 或 `RateLimited` |
+
+登入限制以 Serializable transaction 計算 15 分鐘滾動視窗；帳號或來源 IP 累積 5 次無效登入後回傳 429。狀態存於 SQL Server，可供多個 API instance 共用。
 
 ### ProjectReminderRuns
 

@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Bogus" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit.Analyzers" />
+    <PackageReference Include="NUnit3TestAdapter" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="NUnit.Framework" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ProjectManagementWeb.Application\ProjectManagementWeb.Application.csproj" />
+    <ProjectReference Include="..\..\src\ProjectManagementWeb.Domain\ProjectManagementWeb.Domain.csproj" />
+    <ProjectReference Include="..\..\src\ProjectManagementWeb.Api\ProjectManagementWeb.Api.csproj" />
+    <ProjectReference Include="..\..\src\ProjectManagementWeb.Infrastructure\ProjectManagementWeb.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

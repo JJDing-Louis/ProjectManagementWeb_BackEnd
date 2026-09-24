@@ -1,0 +1,159 @@
+# ProjectManagementWeb BackEnd
+
+ProjectManagementWeb 的 ASP.NET Core Web API 後端 MVP。採前後端分離、分層架構、SQL Server 與 EF Core migrations，提供帳號驗證、系統／專案角色、專案、Task、留言、偏好與稽核功能。
+
+## 文件導覽
+
+| 文件 | 內容 |
+|---|---|
+| [API 清單](docs/ApiList.md) | 40 個 `/api/v1` endpoint、授權範圍、request 與 status code |
+| [系統架構](docs/Architecture.md) | C4 Level 3 Component Diagram、主要請求流程與 Compose 部署關係 |
+| [資料表 Schema](docs/TableSchema.md) | 26 張應用資料表的欄位、PK、FK、index、刪除行為與現行風險；另說明 Hangfire SQL schema |
+| [E-R Diagram](docs/E-R_Diagram.md) | Identity／RBAC、專案／Task 與系統紀錄關聯圖 |
+| [前端／API 契約](docs/FrontendContract.md) | Vue／TypeScript 型別、JWT、CSRF、refresh、rowversion 與錯誤處理 |
+
+## 技術與架構
+
+- .NET 10、ASP.NET Core Controller-based Web API
+- ASP.NET Core Identity（Guid 主鍵）
+- EF Core 10、SQL Server 2022、migration 版本控制
+- RSA JWT Access Token（15 分鐘）與 opaque Refresh Token（7 天、HttpOnly Cookie、rotation）
+- Hangfire 1.8、SQL Server storage、Project 當地時區 Task 到期提醒
+- OpenAPI 3、Swagger UI
+- NUnit 4、Moq、Bogus、FluentAssertions 7.2.2
+- Docker multi-stage build 與 Docker Compose
+
+Solution 依賴方向：
+
+```text
+Api -> Application -> Domain
+Api -> Infrastructure -> Application / Domain
+```
+
+目前具體 use case 實作位於 Infrastructure services，透過 Application interfaces 提供給 Controller；Controller 不直接操作 EF Core。
+
+## 專案結構
+
+```text
+ProjectManagementWeb_BackEnd/
+├── src/
+│   ├── ProjectManagementWeb.Api/              # Controllers、HTTP pipeline、授權入口
+│   ├── ProjectManagementWeb.Application/      # Contracts、DTO、service interfaces
+│   ├── ProjectManagementWeb.Domain/           # Entities、roles、functions、enums
+│   └── ProjectManagementWeb.Infrastructure/   # EF Core、Identity、JWT、SMTP、Hangfire、services
+├── tests/
+│   ├── ProjectManagementWeb.UnitTests/
+│   └── ProjectManagementWeb.IntegrationTests/
+├── docs/                                      # API、架構、Schema、ER 與前端契約
+├── Dockerfile
+└── compose.yaml
+```
+
+API 使用傳統 `Program.Main` 進入點，不使用 Top-level statements；組態方法集中在 `Program` 類別中。
+
+## 權限模型
+
+- 每個帳號最多一個系統角色，資料庫以 `AccountRoles.UserId` UNIQUE index 強制保證。
+- 固定系統角色：`Admin`、`Administrator`、`User`、`Viewer`。
+- 註冊帳號固定為 `Viewer`；Email 未驗證仍可登入，但 token 只包含 Viewer 的 Function。
+- 每個帳號在同一專案只有一筆 `ProjectMember`，可透過 `ProjectMemberRoles` 擁有多個專案角色。
+- `ProjectManager` 採資源型授權；`Viewer` 即使被誤配為 ProjectManager 也不能寫入。
+- 異動系統角色或停用帳號會讓既有 JWT 的 token version 失效，並撤銷全部 Refresh Token。
+- Bootstrap Admin 由 `BootstrapAdmin:Account` 識別，使用者清單與成員候選會排除該帳號，角色與狀態不可由 API 修改，亦不能透過新增成員 API 加入專案。
+- 本人可維護顯示名稱與電話；電話變更會清除 `PhoneNumberConfirmed`，並在 `AuditLogs` 留下異動欄位紀錄。
+
+## Auth 安全邊界
+
+- 註冊要求帳號、Email、顯示名稱、密碼及確認密碼；密碼至少 10 字元並包含大小寫英文字母、數字與特殊字元。
+- Email 驗證使用 32-byte opaque token，資料庫只保存 SHA-256 hash；成功寄送後啟用、3 分鐘到期且只能使用一次。
+- Email 驗證信重寄採帳號 60 秒冷卻，以及帳號／來源 IP 每 60 分鐘 5 次限制。
+- 登入失敗以帳號鍵與來源 IP 的 hash 記錄；任一方於 15 分鐘內累積 5 次即回傳 HTTP 429。
+- 只有明確設定可信 `ReverseProxy:KnownProxies` 或 `KnownNetworks` 時才處理 forwarded headers，避免偽造來源 IP。
+
+## 本機執行
+
+需要 .NET SDK 10.0.201 與 SQL Server。連線字串、JWT 私鑰、SMTP 帳密應使用環境變數或 User Secrets，不要寫入設定檔：
+
+```bash
+export ConnectionStrings__DefaultConnection='Server=localhost,1433;Database=ProjectManagementWeb;User Id=pmw_app;Password=...;Encrypt=True;TrustServerCertificate=True'
+export Jwt__PrivateKeyPem="$(cat /path/to/private-key.pem)"
+export PMW_MIGRATION_DEFAULT_TIME_ZONE_ID='Asia/Taipei'
+dotnet tool restore
+dotnet ef database update --project src/ProjectManagementWeb.Infrastructure --startup-project src/ProjectManagementWeb.Api
+Hangfire__PrepareSchemaIfNecessary=true dotnet run --project src/ProjectManagementWeb.Api -- --initialize-hangfire
+dotnet run --project src/ProjectManagementWeb.Api
+```
+
+### 使用 Rider 啟動
+
+Rider 不會自動載入 Docker Compose 的 `.env`。第一次以 Rider 直接啟動 API 前，請將本機 SQL Server 連線字串存入 .NET User Secrets：
+
+```bash
+dotnet user-secrets set \
+  --project src/ProjectManagementWeb.Api \
+  'ConnectionStrings:DefaultConnection' \
+  'Server=localhost,1433;Database=ProjectManagementWeb;User Id=pmw_app;Password=...;Encrypt=True;TrustServerCertificate=True'
+```
+
+接著在 Rider 選擇 `http` 或 `https` launch profile 啟動。User Secrets 只會在 Development 環境載入，且不會寫入 Git；若未設定連線字串，應用程式會在啟動時明確回報缺少 `ConnectionStrings:DefaultConnection`。
+
+Development 預設提供：
+
+- Health：`http://localhost:5062/health`（實際 port 依 launch profile）
+- OpenAPI：`/openapi/v1.json`
+- Swagger UI：`/swagger`
+
+本機 Development 的 `Smtp:CheckCertificateRevocation` 預設為 `false`，用來避開部分 macOS／IDE 環境對 Gmail 憑證鏈回報 `incomplete certificate revocation check` 的問題。這只略過撤銷狀態查詢，TLS 憑證鏈與主機名稱仍會驗證。非 Development 環境預設為 `true`；正式環境不應為了排除連線問題而關閉。
+
+Gmail SMTP 必須使用已啟用兩步驟驗證之帳號產生的應用程式密碼，不可使用一般登入密碼。IDE 不會自動載入 Compose 的 `.env`，啟動設定仍需提供 `Smtp__UserName`、`Smtp__Password` 與 `Smtp__FromAddress`。
+
+Production 預設不公開 OpenAPI；若確有需要，設定 `OpenApi__Enabled=true`。
+
+## Docker Compose
+
+先複製 `.env.example` 為 `.env` 並替換所有密碼與私鑰，再執行：
+
+```bash
+docker compose config
+docker compose up --build
+```
+
+啟動順序是 SQL Server health check、建立 migration／API 專用登入、套用 EF migrations、初始化 Hangfire schema、啟動 API。SA 只用於初始化；migration 使用 `pmw_migrator`，API 使用只有資料讀寫權限的 `pmw_app`。
+
+首次部署可透過 `BOOTSTRAP_ADMIN_ACCOUNT`、`BOOTSTRAP_ADMIN_EMAIL`、`BOOTSTRAP_ADMIN_PASSWORD` 建立第一位已驗證 Admin；後續啟動會確保此帳號維持啟用且系統角色固定為 `Admin`，但不會改動其他帳號資料。完成初始化後仍須保留 Bootstrap 帳號設定供保護規則識別，密碼則應從部署環境移除。
+
+Apple Silicon 使用 `platform: linux/amd64` 執行 SQL Server 2022 Linux image，仰賴 Docker 的 x64 模擬；Microsoft 不正式支援此模擬環境，因此正式環境應使用受支援的 x64 Linux 主機或受管理 SQL Server。
+
+## CSRF 與 Auth 呼叫順序
+
+SPA 先呼叫 `GET /api/v1/security/csrf-token`，保存回傳的 request token；呼叫 register、login、refresh、logout、Email confirm 或 resend 時，將 token 放入 `X-CSRF-TOKEN` header。Access Token 由前端保存在記憶體，業務 API 透過 `Authorization: Bearer {token}` 呼叫。
+
+Refresh Token 原文只存在 `PMW-REFRESH` HttpOnly Cookie；資料庫只保存 SHA-256 hash。Refresh 每次輪替，已使用或撤銷的 token 再次出現時，整個 token family 都會撤銷。
+
+## Schema 與 migration
+
+正式 Schema 來源位於 `src/ProjectManagementWeb.Infrastructure/Persistence/Migrations/`。新增 migration：
+
+```bash
+dotnet ef migrations add MigrationName --project src/ProjectManagementWeb.Infrastructure --startup-project src/ProjectManagementWeb.Api --output-dir Persistence/Migrations
+```
+
+禁止使用 `EnsureCreated`。Project、Task、可修改留言使用 SQL Server `rowversion`，API 以 Base64 傳遞；版本衝突回傳 HTTP 409。
+
+目前應用 migration 共有 26 張資料表，另由 migrator 初始化 Hangfire SQL schema。Project／Task 業務編號由後端依 UTC 日期自動產生，格式分別為 `PRJ-YYYYMMDD######` 與 `TASK-YYYYMMDD######`，兩類型每日各自從 `000001` 起算。`Accounts.NormalizedEmail` 已採 NOT NULL／UNIQUE，Refresh Token rotation 已有 self-FK，Task 到期提醒則以 Project 當地日期與 Task／收件人唯一鍵保證冪等。詳細限制請參閱 [TableSchema.md](docs/TableSchema.md)。
+
+## 驗證
+
+```bash
+dotnet format --verify-no-changes
+dotnet build
+dotnet test
+dotnet list package --vulnerable --include-transitive
+docker compose config
+```
+
+IntegrationTests 的輕量 API surface 測試使用 `WebApplicationFactory`。完整資料庫流程由 Compose 實際啟動 SQL Server、套用 migration 後進行 smoke test；不可改用 EF InMemory 來宣稱 SQL Server relational behavior 已驗證。
+
+## 本階段不包含
+
+RoleFunction 動態管理、雲端部署與密碼重設不在本 MVP 範圍。Hangfire 到期提醒已完成；最終寄送失敗會保存 DB Failed／AlertedAt 與不含敏感資料的結構化 Warning Log，本期不提供管理 UI。Vue 3 前端已透過 `/api/v1` 正式串接本 API。

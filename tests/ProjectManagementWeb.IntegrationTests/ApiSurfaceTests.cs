@@ -3,8 +3,12 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using ProjectManagementWeb.Api;
 
 namespace ProjectManagementWeb.IntegrationTests;
@@ -50,6 +54,26 @@ public sealed class ApiSurfaceTests
         body.Should().Contain("token");
         response.Headers.TryGetValues("Set-Cookie", out IEnumerable<string>? cookies).Should().BeTrue();
         cookies.Should().Contain(value => value.Contains("PMW-CSRF", StringComparison.Ordinal));
+    }
+
+    [TestCase("Development", CookieSecurePolicy.SameAsRequest)]
+    [TestCase("Testing", CookieSecurePolicy.SameAsRequest)]
+    [TestCase("Production", CookieSecurePolicy.Always)]
+    public void CsrfCookieSecurePolicy應依環境設定(string environment, CookieSecurePolicy expectedPolicy)
+    {
+        using RSA rsa = RSA.Create(2048);
+        using WebApplicationFactory<Program> factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment(environment);
+            builder.UseSetting("ConnectionStrings:DefaultConnection", TestConnectionString);
+            builder.UseSetting("BootstrapAdmin:Account", string.Empty);
+            builder.UseSetting("Jwt:PrivateKeyPem", rsa.ExportPkcs8PrivateKeyPem());
+            builder.UseSetting("ReminderJobs:Enabled", "false");
+        });
+
+        AntiforgeryOptions options = factory.Services.GetRequiredService<IOptions<AntiforgeryOptions>>().Value;
+
+        options.Cookie.SecurePolicy.Should().Be(expectedPolicy);
     }
 
     // 測試案例：TC-ERR-AUTH-005（register 缺少 CSRF；部分覆蓋）

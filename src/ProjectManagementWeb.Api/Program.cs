@@ -51,7 +51,10 @@ public partial class Program
             options.Cookie.Name = "PMW-CSRF";
             options.Cookie.HttpOnly = true;
             options.Cookie.SameSite = SameSiteMode.Lax;
-            options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+            options.Cookie.SecurePolicy = builder.Environment.IsDevelopment() ||
+                                          builder.Environment.IsEnvironment("Testing")
+                ? CookieSecurePolicy.SameAsRequest
+                : CookieSecurePolicy.Always;
         });
 
         IDataProtectionBuilder dataProtection = builder.Services.AddDataProtection()

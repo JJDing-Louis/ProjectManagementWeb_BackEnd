@@ -10,8 +10,13 @@ public sealed class AuthController : ApiControllerBase
 {
     private const string RefreshCookieName = "PMW-REFRESH";
     private readonly IAuthService _authService;
+    private readonly IWebHostEnvironment _environment;
 
-    public AuthController(IAuthService authService) => _authService = authService;
+    public AuthController(IAuthService authService, IWebHostEnvironment environment)
+    {
+        _authService = authService;
+        _environment = environment;
+    }
 
     [AllowAnonymous, ValidateAntiForgeryToken]
     [HttpPost("register")]
@@ -86,7 +91,7 @@ public sealed class AuthController : ApiControllerBase
     private CookieOptions RefreshCookieOptions(DateTimeOffset expires) => new()
     {
         HttpOnly = true,
-        Secure = Request.IsHttps,
+        Secure = (!_environment.IsDevelopment() && !_environment.IsEnvironment("Testing")) || Request.IsHttps,
         SameSite = SameSiteMode.Lax,
         Path = "/api/v1/auth",
         Expires = expires

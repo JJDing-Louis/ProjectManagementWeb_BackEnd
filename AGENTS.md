@@ -6,6 +6,8 @@
 
 本目錄為已初始化的 **ASP.NET Core Web API** 後端專案。後續開發、程式碼審查與測試必須延續既有分層與技術選型。不得把範例程式、空白 scaffold、尚未建置或未驗證的程式碼視為完成實作。
 
+建立開發分支、提交、Pull Request、Release、Hotfix 或版本 tag 前，先閱讀 `docs/git-flow.md`；該文件是本 repository 的 GitFlow 與 AI Agent Git 作業規範。
+
 ## 2. 需求與文件優先順序
 
 實作前必須先閱讀與功能相關的規格。需求判斷依下列順序進行：

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using ProjectManagementWeb.Domain.Constants;
 using ProjectManagementWeb.Domain.Entities;
 using ProjectManagementWeb.Infrastructure.Identity;
@@ -51,6 +52,8 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Ap
             entity.Property(x => x.NormalizedEmail).HasMaxLength(256).IsRequired();
             entity.Property(x => x.Name).HasMaxLength(100);
             entity.Property(x => x.Remark).HasMaxLength(500);
+            entity.Property(x => x.AvatarImage).HasColumnType("varbinary(max)")
+                .Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
             entity.HasIndex(x => x.NormalizedEmail)
                 .HasDatabaseName("EmailIndex")
                 .IsUnique();

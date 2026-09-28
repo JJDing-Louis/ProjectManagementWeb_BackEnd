@@ -40,6 +40,8 @@
 | PUT | `/api/v1/users/{id}/administration` | `accounts.manage-role` 與 `accounts.manage-status` | `UpdateAdministrationRequest` | 200 `UserResponse` | Serializable transaction 原子更新角色與狀態；系統預設 Admin 不可修改 |
 | GET | `/api/v1/users/me/profile` | 任一已登入帳號 | 無 | 200 `OwnProfileResponse` | 只回傳自己的顯示名稱與電話號碼 |
 | PUT | `/api/v1/users/me/profile` | 任一已登入帳號 | `UpdateOwnProfileRequest` | 200 `OwnProfileResponse` | 名稱必填且最多 100 字；電話可清除、最多 30 字；電話異動會重設 PhoneNumberConfirmed 並寫入 AuditLog |
+| PUT | `/api/v1/users/me/avatar` | 本人且 Email 已驗證；不綁角色或 Function | `multipart/form-data`，欄位 `file` | 204 | 只接受 JPG／JPEG、PNG；圖片須為 1080 × 1080，原檔至多 10 MiB，正規化後至多 5 MiB；覆寫 `Accounts.AvatarImage`，未驗證回 403 |
+| GET | `/api/v1/users/{id}/avatar` | 本人或 `accounts.read` | 無 | 200 圖片位元組；無圖時 404 | 回傳 `image/jpeg` 或 `image/png`，`Cache-Control: no-store`；不將圖片放入使用者 JSON |
 | GET | `/api/v1/users/me/preferences` | `preferences.read-own` | 無 | 200 `PreferenceResponse` | 讀取自己的批次確認偏好 |
 | PUT | `/api/v1/users/me/preferences` | `preferences.update-own` | `UpdatePreferenceRequest` | 200 `PreferenceResponse` | 更新自己的批次確認偏好 |
 | GET | `/api/v1/roles` | 任一已登入帳號 | 無 | 200 `RoleResponse[]` | 回傳固定系統角色及各自 Functions |

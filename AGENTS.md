@@ -118,7 +118,7 @@ Controller 與 route 命名以業務資源為主，例如 Accounts、Users、Pro
 - 驗證回答「使用者是誰」，授權回答「此使用者能否對此資源執行此操作」，兩者不得混為一談。
 - 每個讀取與修改 use case 都必須由後端檢查系統角色、專案成員關係、資源範圍與操作能力；不得依賴前端隱藏按鈕。
 - 授權規則優先集中為 policy、authorization service 或 use-case guard，禁止在各 Controller 複製角色字串判斷。
-- `Viewer` 只能讀取有權限存取的資料，不得新增、修改、刪除、留言、切換 Task 狀態或調整角色。
+- `Viewer` 可維護本人的名稱與電話；完成 Email 驗證後亦可更換本人大頭貼。除此之外只能讀取有權限存取的資料，不得新增、修改、刪除、留言、切換 Task 狀態或調整角色。
 - 密碼只允許使用 ASP.NET Core Identity 或經審查的密碼雜湊機制保存，禁止明文、可逆加密或自行設計密碼雜湊演算法。
 - Access Token 固定使用 15 分鐘 RSA JWT，包含唯一系統角色、Function 與 token-version claims；Refresh Token 為 7 天高熵 opaque token，原文只存 HttpOnly Cookie，資料庫只保存 SHA-256 hash，且每次使用必須輪替。
 - 停用帳號或異動系統角色時，必須遞增 token version 並撤銷全部 Refresh Token；舊 Refresh Token 被重用時撤銷整個 token family。

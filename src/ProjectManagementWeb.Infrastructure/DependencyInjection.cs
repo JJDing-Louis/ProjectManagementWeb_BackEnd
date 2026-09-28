@@ -63,6 +63,8 @@ public static class DependencyInjection
         services.AddScoped<IBusinessCodeGenerator, BusinessCodeGenerator>();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IUserService, UserService>();
+        services.AddSingleton<AvatarImageProcessor>();
+        services.AddScoped<IAvatarService, AvatarService>();
         services.AddScoped<IPreferenceService, PreferenceService>();
         services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<ITaskService, TaskService>();

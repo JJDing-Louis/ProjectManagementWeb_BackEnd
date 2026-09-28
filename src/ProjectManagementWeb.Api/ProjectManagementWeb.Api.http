@@ -1,6 +1,7 @@
 @host = http://localhost:5062
 @csrfToken = 請先執行 csrf-token，並貼上回傳的 token
 @accessToken = 登入後取得的 Access Token
+@accountId = 登入後從 auth/me 取得的 Id
 
 GET {{host}}/health
 Accept: application/json
@@ -26,5 +27,26 @@ X-CSRF-TOKEN: {{csrfToken}}
 GET {{host}}/api/v1/auth/me
 Authorization: Bearer {{accessToken}}
 Accept: application/json
+
+###
+
+# 將 /absolute/path/to/cropped-avatar.png 改為本機已剪裁的 1080 × 1080 PNG 路徑。
+PUT {{host}}/api/v1/users/me/avatar
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=avatar-boundary
+
+--avatar-boundary
+Content-Disposition: form-data; name="file"; filename="avatar.png"
+Content-Type: image/png
+
+< /absolute/path/to/cropped-avatar.png
+--avatar-boundary--
+
+###
+
+# 將 accountId 改為本人，或有 accounts.read 可見的帳號 ID。
+GET {{host}}/api/v1/users/{{accountId}}/avatar
+Authorization: Bearer {{accessToken}}
+Accept: image/png, image/jpeg
 
 ###

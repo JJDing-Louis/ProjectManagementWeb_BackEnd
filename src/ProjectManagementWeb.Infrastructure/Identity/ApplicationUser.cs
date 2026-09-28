@@ -8,4 +8,5 @@ public sealed class ApplicationUser : IdentityUser<Guid>
     public bool IsEnabled { get; set; } = true;
     public int TokenVersion { get; set; }
     public string? Remark { get; set; }
+    public byte[]? AvatarImage { get; set; }
 }

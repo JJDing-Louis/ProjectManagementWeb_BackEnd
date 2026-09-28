@@ -62,7 +62,16 @@ internal sealed class UserService : IUserService
         }
         int total = await users.CountAsync(cancellationToken);
         List<ApplicationUser> pageUsers = await users.OrderBy(x => x.UserName)
-            .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new ApplicationUser
+            {
+                Id = x.Id,
+                UserName = x.UserName,
+                Email = x.Email,
+                Name = x.Name,
+                EmailConfirmed = x.EmailConfirmed,
+                IsEnabled = x.IsEnabled
+            }).ToListAsync(cancellationToken);
         var responses = new List<UserResponse>(pageUsers.Count);
         foreach (ApplicationUser user in pageUsers)
         {
@@ -90,8 +99,9 @@ internal sealed class UserService : IUserService
             return ServiceResult<OwnProfileResponse>.Failure("unauthorized", "尚未登入。", 401);
         }
 
-        ApplicationUser? user = await _db.Users.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == accountId, cancellationToken);
+        ApplicationUser? user = await _db.Users.AsNoTracking().Where(x => x.Id == accountId)
+            .Select(x => new ApplicationUser { UserName = x.UserName, Name = x.Name, PhoneNumber = x.PhoneNumber })
+            .SingleOrDefaultAsync(cancellationToken);
         return user is null
             ? ServiceResult<OwnProfileResponse>.Failure("not_found", "找不到帳號。", 404)
             : ServiceResult<OwnProfileResponse>.Success(MapOwnProfile(user));

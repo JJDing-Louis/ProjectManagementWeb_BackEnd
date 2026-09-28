@@ -38,6 +38,7 @@ ASP.NET Core Identity 帳號資料。
 | `LockoutEnabled` | `bit` | 否 |  | 是否啟用鎖定 |
 | `AccessFailedCount` | `int` | 否 |  | 登入失敗次數 |
 | `Name` | `nvarchar(100)` | 是 |  | 顯示姓名 |
+| `AvatarImage` | `varbinary(max)` | 是 |  | 僅保存最後一次成功上傳、已剪裁及重新編碼的 1080 × 1080 JPG／PNG；新圖覆寫舊值，不保存原圖或歷史版本 |
 | `Remark` | `nvarchar(500)` | 是 |  | 備註 |
 | `IsEnabled` | `bit` | 否 |  | 帳號是否啟用 |
 | `TokenVersion` | `int` | 否 |  | JWT 失效版本 |

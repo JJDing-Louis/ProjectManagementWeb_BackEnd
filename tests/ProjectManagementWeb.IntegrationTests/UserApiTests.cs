@@ -12,6 +12,7 @@ using ProjectManagementWeb.Domain.Constants;
 using ProjectManagementWeb.Domain.Entities;
 using ProjectManagementWeb.Infrastructure.Identity;
 using ProjectManagementWeb.Infrastructure.Persistence;
+using SkiaSharp;
 
 namespace ProjectManagementWeb.IntegrationTests;
 
@@ -40,6 +41,10 @@ public sealed class UserApiTests
     [TearDown]
     public async Task TearDown()
     {
+        if (_factory is null)
+        {
+            return;
+        }
         await RestoreTemporarilyDisabledAdminsAsync();
         await CleanupTestDataAsync();
         await _factory.DisposeAsync();
@@ -464,6 +469,101 @@ public sealed class UserApiTests
     }
 
     [Test]
+    public async Task 未登入及未驗證帳號不可上傳大頭貼()
+    {
+        (Guid unverifiedId, string account) = await CreateUserAsync(SystemRoles.Viewer, emailConfirmed: false);
+        byte[] image = CreateAvatarImage(SKEncodedImageFormat.Png, SKColors.Red);
+        using HttpClient anonymous = _factory.CreateClient();
+        (await PutAvatarAsync(anonymous, image, "avatar.png", "image/png")).StatusCode
+            .Should().Be(HttpStatusCode.Unauthorized);
+        (await anonymous.GetAsync($"/api/v1/users/{unverifiedId}/avatar")).StatusCode
+            .Should().Be(HttpStatusCode.Unauthorized);
+
+        using HttpClient viewer = await CreateAuthenticatedClientAsync(account);
+        await AssertProblemAsync(await PutAvatarAsync(viewer, image, "avatar.png", "image/png"),
+            HttpStatusCode.Forbidden, "email_not_verified");
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        (await db.Users.Where(x => x.Id == unverifiedId).Select(x => x.AvatarImage).SingleAsync())
+            .Should().BeNull();
+    }
+
+    [Test]
+    public async Task 已驗證Viewer可上傳覆寫本人圖片且他人不可讀寫()
+    {
+        (Guid ownId, string ownAccount) = await CreateUserAsync(SystemRoles.Viewer);
+        (Guid otherId, string otherAccount) = await CreateUserAsync(SystemRoles.Viewer);
+        (_, string adminAccount) = await CreateUserAsync(SystemRoles.Admin);
+        using HttpClient owner = await CreateAuthenticatedClientAsync(ownAccount);
+        using HttpClient other = await CreateAuthenticatedClientAsync(otherAccount);
+        using HttpClient admin = await CreateAuthenticatedClientAsync(adminAccount);
+
+        (await owner.GetAsync($"/api/v1/users/{ownId}/avatar")).StatusCode
+            .Should().Be(HttpStatusCode.NotFound);
+        byte[] first = CreateAvatarImage(SKEncodedImageFormat.Png, SKColors.Red);
+        (await PutAvatarAsync(owner, first, "avatar.png", "image/png")).StatusCode
+            .Should().Be(HttpStatusCode.NoContent);
+        HttpResponseMessage ownImage = await owner.GetAsync($"/api/v1/users/{ownId}/avatar");
+        ownImage.StatusCode.Should().Be(HttpStatusCode.OK);
+        ownImage.Content.Headers.ContentType!.MediaType.Should().Be("image/png");
+        using (SKBitmap decoded = SKBitmap.Decode(await ownImage.Content.ReadAsByteArrayAsync()))
+        {
+            decoded.Width.Should().Be(1080);
+            decoded.Height.Should().Be(1080);
+            decoded.GetPixel(0, 0).Red.Should().BeGreaterThan(200);
+        }
+
+        await AssertProblemAsync(await other.GetAsync($"/api/v1/users/{ownId}/avatar"),
+            HttpStatusCode.Forbidden, "forbidden");
+        (await admin.GetAsync($"/api/v1/users/{ownId}/avatar")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await PutAvatarAsync(other, first, "avatar.png", "image/png",
+            $"/api/v1/users/{ownId}/avatar")).StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed);
+
+        byte[] second = CreateAvatarImage(SKEncodedImageFormat.Jpeg, SKColors.Blue);
+        (await PutAvatarAsync(owner, second, "avatar.jpeg", "image/jpeg")).StatusCode
+            .Should().Be(HttpStatusCode.NoContent);
+        HttpResponseMessage replaced = await owner.GetAsync($"/api/v1/users/{ownId}/avatar");
+        replaced.Content.Headers.ContentType!.MediaType.Should().Be("image/jpeg");
+        using (SKBitmap decoded = SKBitmap.Decode(await replaced.Content.ReadAsByteArrayAsync()))
+        {
+            decoded.GetPixel(0, 0).Blue.Should().BeGreaterThan(200);
+        }
+        byte[] replacementBytes = await replaced.Content.ReadAsByteArrayAsync();
+        await PutJsonAsync(owner, "/api/v1/users/me/profile", new { name = "更新大頭貼後的名稱", phoneNumber = "" });
+        using HttpClient reauthenticatedOwner = await CreateAuthenticatedClientAsync(ownAccount);
+        byte[] afterProfileUpdate = await (await reauthenticatedOwner.GetAsync($"/api/v1/users/{ownId}/avatar"))
+            .Content.ReadAsByteArrayAsync();
+        afterProfileUpdate.Should().Equal(replacementBytes);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ApplicationDbContext db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        (await db.Users.Where(x => x.Id == otherId).Select(x => x.AvatarImage).SingleAsync())
+            .Should().BeNull();
+        (await db.AuditLogs.CountAsync(x => x.ActorAccountId == ownId && x.Action == "UpdateOwnAvatar"))
+            .Should().Be(2);
+    }
+
+    [Test]
+    public async Task 無效圖片不得覆寫原有大頭貼()
+    {
+        (Guid ownId, string account) = await CreateUserAsync(SystemRoles.Viewer);
+        using HttpClient owner = await CreateAuthenticatedClientAsync(account);
+        byte[] original = CreateAvatarImage(SKEncodedImageFormat.Png, SKColors.Red);
+        (await PutAvatarAsync(owner, original, "avatar.png", "image/png")).StatusCode
+            .Should().Be(HttpStatusCode.NoContent);
+        byte[] before = await (await owner.GetAsync($"/api/v1/users/{ownId}/avatar"))
+            .Content.ReadAsByteArrayAsync();
+
+        await AssertProblemAsync(await PutAvatarAsync(owner, original, "avatar.jpg", "image/jpeg"),
+            HttpStatusCode.UnsupportedMediaType, "avatar_format_invalid");
+        await AssertProblemAsync(await PutAvatarAsync(owner, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+            "avatar.png", "image/png"), HttpStatusCode.BadRequest, "avatar_image_invalid");
+        byte[] after = await (await owner.GetAsync($"/api/v1/users/{ownId}/avatar"))
+            .Content.ReadAsByteArrayAsync();
+        after.Should().Equal(before);
+    }
+
+    [Test]
     public async Task 個人資料更新應拒絕空白過長名稱及無效電話並保持原資料()
     {
         (Guid accountId, string account) = await CreateUserAsync(SystemRoles.User, name: "原始名稱");
@@ -620,6 +720,25 @@ public sealed class UserApiTests
         await db.SaveChangesAsync();
         _accountIds.Add(user.Id);
         return (user.Id, account);
+    }
+
+    private static async Task<HttpResponseMessage> PutAvatarAsync(HttpClient client, byte[] image,
+        string fileName, string contentType, string path = "/api/v1/users/me/avatar")
+    {
+        using var body = new MultipartFormDataContent();
+        using var file = new ByteArrayContent(image);
+        file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        body.Add(file, "file", fileName);
+        return await client.PutAsync(path, body);
+    }
+
+    private static byte[] CreateAvatarImage(SKEncodedImageFormat format, SKColor color)
+    {
+        using var bitmap = new SKBitmap(1080, 1080);
+        bitmap.Erase(color);
+        using SKImage image = SKImage.FromBitmap(bitmap);
+        using SKData encoded = image.Encode(format, 90);
+        return encoded.ToArray();
     }
 
     private async Task<HttpClient> CreateAuthenticatedClientAsync(string account)

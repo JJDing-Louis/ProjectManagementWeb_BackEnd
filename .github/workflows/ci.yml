@@ -1,0 +1,73 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+  push:
+    branches:
+      - develop
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 格式、建置與單元測試
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 取得原始碼
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 安裝 .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: 顯示 .NET 環境資訊
+        run: dotnet --info
+
+      - name: 還原 NuGet 套件
+        run: dotnet restore ProjectManagementWeb.slnx
+
+      - name: 檢查程式碼格式
+        run: >
+          dotnet format ProjectManagementWeb.slnx
+          --verify-no-changes
+          --no-restore
+
+      - name: 建置 Solution
+        run: >
+          dotnet build ProjectManagementWeb.slnx
+          --configuration Release
+          --no-restore
+
+      - name: 執行單元測試
+        run: >
+          dotnet test
+          tests/ProjectManagementWeb.UnitTests/ProjectManagementWeb.UnitTests.csproj
+          --configuration Release
+          --no-build
+          --logger "console;verbosity=normal"
+
+      - name: 檢查 NuGet 套件弱點
+        run: >
+          dotnet list ProjectManagementWeb.slnx package
+          --vulnerable
+          --include-transitive
